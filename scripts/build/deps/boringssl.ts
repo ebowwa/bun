@@ -39,7 +39,7 @@ export const boringssl: Dependency = {
   // Upstream mem.cc gates OPENSSL_memory_* weak-symbol overrides on __ELF__;
   // on Mach-O/COFF the hooks compile to static nullptr and OPENSSL_malloc goes
   // straight to libc. Declare them as plain externs so lib.rs binds everywhere.
-  patches: ["patches/boringssl/require-memory-hooks.patch"],
+  patches: ["patches/boringssl/require-memory-hooks.patch", "patches/boringssl/expose_aes-cfb8.patch"],
 
   build: cfg => {
     // win-x64 uses NASM-syntax .asm; everything else (including win-aarch64)
