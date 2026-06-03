@@ -30,6 +30,7 @@ unsafe extern "C" {
     safe fn JSC__VM__runGC(vm: &VM, sync: bool) -> usize;
     safe fn JSC__VM__heapSize(vm: &VM) -> usize;
     safe fn JSC__VM__collectAsync(vm: &VM);
+    safe fn JSC__VM__collectNowFull(vm: &VM);
     safe fn JSC__VM__setExecutionForbidden(vm: &VM, forbidden: bool);
     safe fn JSC__VM__executionForbidden(vm: &VM) -> bool;
     safe fn JSC__VM__notifyNeedTermination(vm: &VM);
@@ -100,6 +101,12 @@ impl VM {
 
     pub(crate) fn collect_async(&self) {
         JSC__VM__collectAsync(self)
+    }
+
+    /// Full, synchronous collection that preserves the VM-scoped bytecode and
+    /// source-provider caches (unlike [`VM::run_gc`]).
+    pub fn collect_now_full(&self) {
+        JSC__VM__collectNowFull(self)
     }
 
     pub fn set_execution_forbidden(&self, forbidden: bool) {
