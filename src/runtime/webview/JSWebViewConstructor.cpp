@@ -119,6 +119,7 @@ JSC_DEFINE_HOST_FUNCTION(constructWebView, (JSGlobalObject * globalObject, CallF
     WTF::Vector<WTF::String> chromeArgv;
     bool stdoutInherit = false;
     bool stderrInherit = false;
+    bool detached = false;
     bool consoleIsGlobal = false;
     JSObject* consoleCallback = nullptr;
 
@@ -266,6 +267,16 @@ JSC_DEFINE_HOST_FUNCTION(constructWebView, (JSGlobalObject * globalObject, CallF
             };
             if (!parseStdio("stdout"_s, stdoutInherit)) return {};
             if (!parseStdio("stderr"_s, stderrInherit)) return {};
+
+            // detached: setsid() the subprocess (see bun.d.ts for the rationale).
+            JSValue detachedOpt = beObj->get(globalObject, Identifier::fromString(vm, "detached"_s));
+            RETURN_IF_EXCEPTION(scope, {});
+            if (detachedOpt.isBoolean()) {
+                detached = detachedOpt.asBoolean();
+            } else if (!detachedOpt.isUndefined()) {
+                return Bun::throwError(globalObject, scope, ErrorCode::ERR_INVALID_ARG_TYPE,
+                    "backend.detached must be a boolean"_s);
+            }
         }
 
         // Initial URL — the navigate() is fired off immediately after
@@ -343,8 +354,8 @@ JSC_DEFINE_HOST_FUNCTION(constructWebView, (JSGlobalObject * globalObject, CallF
     if (backend == WebViewBackend::Chrome) {
         Bun__Feature__webview_chrome += 1;
         JSWebView* view = JSWebView::createChrome(globalObject, structure, width, height,
-            persistDir, chromePath, chromeArgv, stdoutInherit, stderrInherit, chromeWsUrl,
-            chromeSkipAutoDetect);
+            persistDir, chromePath, chromeArgv, stdoutInherit, stderrInherit, detached,
+            chromeWsUrl, chromeSkipAutoDetect);
         if (!view) {
             return Bun::throwError(globalObject, scope, ErrorCode::ERR_DLOPEN_FAILED,
                 chromeWsUrl.isEmpty()
@@ -363,7 +374,7 @@ JSC_DEFINE_HOST_FUNCTION(constructWebView, (JSGlobalObject * globalObject, CallF
 #else
     Bun__Feature__webview_webkit += 1;
     JSWebView* view = JSWebView::createAndSend(globalObject, structure, width, height, persistDir,
-        stdoutInherit, stderrInherit);
+        stdoutInherit, stderrInherit, detached);
     if (!view) {
         return Bun::throwError(globalObject, scope, ErrorCode::ERR_DLOPEN_FAILED,
             "Failed to spawn WebView host process"_s);
