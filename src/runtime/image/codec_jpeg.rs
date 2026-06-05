@@ -287,6 +287,7 @@ pub(crate) fn decode(
         rgba: out,
         width: w,
         height: ht,
+        bit_depth: 8,
         icc_profile: icc,
     })
 }
