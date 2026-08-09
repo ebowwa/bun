@@ -13,9 +13,8 @@ bun_core::declare_scope!(ArrayBuffer, visible);
 /// when a zero-copy ArrayBuffer/typed array backing store is collected.
 pub type JSTypedArrayBytesDeallocator = Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>;
 
-/// JSC's hard cap on `ArrayBuffer` byte length (`MAX_ARRAY_BUFFER_SIZE` in
-/// WebKit's `PageCount.h`); `ArrayBuffer::createFromBytes` RELEASE_ASSERTs
-/// past it instead of throwing.
+/// JSC's `MAX_ARRAY_BUFFER_SIZE` (WebKit's `PageCount.h`);
+/// `ArrayBuffer::createFromBytes` RELEASE_ASSERTs past it instead of throwing.
 pub const MAX_ARRAY_BUFFER_SIZE: usize = 1 << 32;
 
 // ──────────────────────────────────────────────────────────────────────────

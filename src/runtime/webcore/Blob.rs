@@ -6651,9 +6651,8 @@ impl Any {
                 ))
             }
             Any::WTFStringImpl(impl_) => {
-                // Only a 16-bit source can encode past MAX_ARRAY_BUFFER_SIZE
-                // (3 UTF-8 bytes per code unit; 8-bit tops out at 2 * i32::MAX),
-                // where `from_default_allocator` aborts instead of throwing.
+                // Only a 16-bit source encodes past MAX_ARRAY_BUFFER_SIZE (3 UTF-8 bytes
+                // per code unit), where `from_default_allocator` aborts instead of throwing.
                 let too_large = {
                     let wtf = super::body::wtf_impl(impl_);
                     !wtf.is_8bit()
