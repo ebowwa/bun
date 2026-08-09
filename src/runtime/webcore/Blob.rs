@@ -6651,11 +6651,9 @@ impl Any {
                 ))
             }
             Any::WTFStringImpl(impl_) => {
-                // Only a 16-bit source can encode past JSC's ArrayBuffer cap (up
-                // to 3 UTF-8 bytes per code unit; an 8-bit source stays within 2x
-                // of WTF's INT_MAX length limit). The length gate keeps the exact
-                // scan off every ordinary body, and the pre-check keeps the error
-                // path from materializing the oversized buffer.
+                // Only a 16-bit source can encode past MAX_ARRAY_BUFFER_SIZE
+                // (3 UTF-8 bytes per code unit; 8-bit tops out at 2 * i32::MAX),
+                // where `from_default_allocator` aborts instead of throwing.
                 let too_large = {
                     let wtf = super::body::wtf_impl(impl_);
                     !wtf.is_8bit()

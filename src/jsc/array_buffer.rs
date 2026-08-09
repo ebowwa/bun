@@ -14,10 +14,8 @@ bun_core::declare_scope!(ArrayBuffer, visible);
 pub type JSTypedArrayBytesDeallocator = Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>;
 
 /// JSC's hard cap on `ArrayBuffer` byte length (`MAX_ARRAY_BUFFER_SIZE` in
-/// WebKit's `PageCount.h`). `ArrayBuffer::createFromBytes` does not check it
-/// gracefully (anything larger trips a `RELEASE_ASSERT`), so paths that adopt
-/// an already-encoded buffer must reject larger sizes with a catchable error
-/// first.
+/// WebKit's `PageCount.h`); `ArrayBuffer::createFromBytes` RELEASE_ASSERTs
+/// past it instead of throwing.
 pub const MAX_ARRAY_BUFFER_SIZE: usize = 1 << 32;
 
 // ──────────────────────────────────────────────────────────────────────────
