@@ -222,3 +222,38 @@ describe.skipIf(os.totalmem() < 10 * 1024 ** 3)("byte sources at the 2 GiB strin
     expect(exitCode).toBe(0);
   });
 });
+
+// The utf8 encoding of a string body can exceed JSC's hard ArrayBuffer cap
+// (2^32 bytes) even though the string itself is a valid length. These used to
+// hand the encoded bytes to ArrayBuffer::createFromBytes, which RELEASE_ASSERTs
+// past the cap and aborted the process; now the size is checked before
+// encoding. The string alone is ~2.9 GiB, so the case runs in a subprocess and
+// the block is gated like the 2 GiB one above.
+describe.skipIf(os.totalmem() < 10 * 1024 ** 3)("string bodies above the 4 GiB ArrayBuffer limit", () => {
+  test("Response/Request arrayBuffer() and bytes() throw instead of aborting", async () => {
+    await using proc = Bun.spawn({
+      cmd: [
+        bunExe(),
+        "-e",
+        `
+          const results = [];
+          const report = e => ({ name: e.name, message: e.message });
+          const s = "\\u20ac".repeat(1431655766); // 3 utf8 bytes each -> 2**32 + 2
+          await new Response(s).arrayBuffer().then(() => results.push("RESPONSE_ARRAYBUFFER_UNEXPECTED_SUCCESS"), e => results.push(report(e)));
+          await new Response(s).bytes().then(() => results.push("RESPONSE_BYTES_UNEXPECTED_SUCCESS"), e => results.push(report(e)));
+          await new Request("http://localhost/", { method: "POST", body: s }).arrayBuffer().then(() => results.push("REQUEST_ARRAYBUFFER_UNEXPECTED_SUCCESS"), e => results.push(report(e)));
+          console.log(JSON.stringify(results));
+          `,
+      ],
+      env: bunEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    const oom = { name: "RangeError", message: "Out of memory" };
+    expect(JSON.parse(stdout.trim() || JSON.stringify({ stdout, stderr, exitCode }))).toEqual([oom, oom, oom]);
+    expect(exitCode).toBe(0);
+    // The subprocess writes and scans a real ~2.9 GiB string; debug/ASAN builds
+    // need well over the default 5s.
+  }, 90_000);
+});

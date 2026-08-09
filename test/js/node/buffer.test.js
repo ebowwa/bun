@@ -4695,3 +4695,35 @@ it.skipIf(os.totalmem() < 10 * 1024 ** 3)(
     expect(exitCode).toBe(0);
   },
 );
+
+// A string whose utf8 encoding exceeds MAX_LENGTH (2**32 bytes) must throw a
+// catchable RangeError from Buffer.from instead of aborting the process in
+// JSC's ArrayBuffer size assert. Buffer.byteLength on the same string stays
+// exact (no uint32 wrap).
+it.skipIf(os.totalmem() < 10 * 1024 ** 3)(
+  "Buffer.from of a string with utf8 size beyond MAX_LENGTH throws instead of aborting",
+  async () => {
+    const script = `
+      const s = "\\u20ac".repeat(1431655766); // 3 utf8 bytes each -> 2**32 + 2
+      const out = { byteLength: Buffer.byteLength(s, "utf8") };
+      try { out.from = "no throw: " + Buffer.from(s, "utf8").length; }
+      catch (e) { out.from = e.name + ": " + e.message; }
+      console.log(JSON.stringify(out));
+    `;
+    await using proc = Bun.spawn({
+      cmd: [bunExe(), "-e", script],
+      env: { ...bunEnv, BUN_GARBAGE_COLLECTOR_LEVEL: "0" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect({ stdout: stdout.trim(), stderr }).toEqual({
+      stdout: JSON.stringify({ byteLength: 4294967298, from: "RangeError: Out of memory" }),
+      stderr: "",
+    });
+    expect(exitCode).toBe(0);
+  },
+  // The subprocess writes and scans a real ~2.9 GiB string; debug/ASAN builds
+  // need well over the default 5s.
+  90_000,
+);

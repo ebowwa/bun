@@ -6637,6 +6637,10 @@ impl Any {
         match self {
             Any::Blob(b) => b.to_array_buffer_view::<TYPED_ARRAY_VIEW>(global, lifetime),
             Any::InternalBlob(ib) => {
+                if ib.bytes.len() > jsc::array_buffer::MAX_ARRAY_BUFFER_SIZE {
+                    *self = Any::Blob(Blob::default());
+                    return Err(global.throw_out_of_memory());
+                }
                 // Ownership transfers to JSC via the default-allocator path.
                 let bytes: &mut [u8] = ib.to_owned_slice().leak();
                 *self = Any::Blob(Blob::default());
@@ -6647,6 +6651,18 @@ impl Any {
                 ))
             }
             Any::WTFStringImpl(impl_) => {
+                // Only a 16-bit source can encode past JSC's ArrayBuffer cap (up
+                // to 3 UTF-8 bytes per code unit; an 8-bit source stays within 2x
+                // of WTF's INT_MAX length limit). The length gate keeps the exact
+                // scan off every ordinary body, and the pre-check keeps the error
+                // path from materializing the oversized buffer.
+                let too_large = {
+                    let wtf = super::body::wtf_impl(impl_);
+                    !wtf.is_8bit()
+                        && wtf.length() as usize > jsc::array_buffer::MAX_ARRAY_BUFFER_SIZE / 3
+                        && wtf.utf8_byte_length() > jsc::array_buffer::MAX_ARRAY_BUFFER_SIZE
+                };
+
                 // Adopts a +1 WTF ref; `OwnedString` releases it on scope exit,
                 // after `out_bytes` (which borrows it) is consumed below.
                 let str = OwnedString::new(BunString::adopt_wtf_impl(core::mem::replace(
@@ -6654,6 +6670,10 @@ impl Any {
                     core::ptr::null_mut(),
                 )));
                 *self = Any::Blob(Blob::default());
+
+                if too_large {
+                    return Err(global.throw_out_of_memory());
+                }
 
                 let out_bytes = str.to_utf8_without_ref();
                 if matches!(out_bytes, bun_core::ZigStringSlice::Owned(_)) {

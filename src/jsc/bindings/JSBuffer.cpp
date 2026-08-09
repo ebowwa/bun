@@ -600,6 +600,17 @@ JSC::EncodedJSValue constructFromEncoding(JSGlobalObject* lexicalGlobalObject, W
         case WebCore::BufferEncodingType::hex:
         case WebCore::BufferEncodingType::ascii:
         case WebCore::BufferEncodingType::latin1: {
+            if (encoding == WebCore::BufferEncodingType::utf8 && span.size() > MAX_ARRAY_BUFFER_SIZE / 3) [[unlikely]] {
+                // utf8 is the only target encoding that can expand a UTF-16 string
+                // past JSC's ArrayBuffer cap (up to 3 bytes per code unit; the rest
+                // stay within 2x of WTF's INT_MAX length limit). Checked up front so
+                // the error path never materializes a buffer that
+                // ArrayBuffer::createFromBytes would RELEASE_ASSERT on.
+                if (Bun__encoding__byteLengthUTF16AsUTF8(span.data(), span.size()) > MAX_ARRAY_BUFFER_SIZE) {
+                    throwOutOfMemoryError(lexicalGlobalObject, scope);
+                    return {};
+                }
+            }
             result = Bun__encoding__constructFromUTF16(lexicalGlobalObject, span.data(), span.size(), static_cast<uint8_t>(encoding));
             break;
         }
