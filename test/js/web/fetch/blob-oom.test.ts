@@ -188,7 +188,7 @@ describe.skipIf(os.totalmem() < 10 * 1024 ** 3)("byte sources at the 2 GiB strin
       },
     ]);
     expect(exitCode).toBe(0);
-  });
+  }, 90_000);
 
   test("Bun.file().text() at 2^31 bytes throws ERR_STRING_TOO_LONG instead of aborting", async () => {
     using dir = tempDir("blob-2gib", {});
@@ -220,7 +220,9 @@ describe.skipIf(os.totalmem() < 10 * 1024 ** 3)("byte sources at the 2 GiB strin
       },
     ]);
     expect(exitCode).toBe(0);
-  });
+    // Reads 2 GiB through the page cache; measured right at the default 5s
+    // ceiling under load.
+  }, 90_000);
 });
 
 // The utf8 encoding of a string body can exceed JSC's hard ArrayBuffer cap
