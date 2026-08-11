@@ -29,3 +29,12 @@ await copy.unsubscribe();
 await copy.unsubscribe("hello");
 
 expectType(copy.unsubscribe("hello", () => {})).is<Promise<void>>();
+
+expectType(Bun.redis.bitcount("key")).is<Promise<number>>();
+expectType(Bun.redis.bitcount("key", 0, -1)).is<Promise<number>>();
+expectType(Bun.redis.bitcount("key", 5, 30, "BIT")).is<Promise<number>>();
+expectType(Bun.redis.bitcount("key", 1, 1, "BYTE")).is<Promise<number>>();
+// @ts-expect-error BITCOUNT takes start and end together
+Bun.redis.bitcount("key", 0);
+// @ts-expect-error the unit is BYTE or BIT
+Bun.redis.bitcount("key", 0, -1, "NIBBLE");

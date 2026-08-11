@@ -101,7 +101,7 @@ fn promise_to_js(p: *mut JSPromise) -> JSValue {
 /// `this.send()` it, and convert the result to a `JsResult<JSValue>` —
 /// `Ok(promise.toJS())` on success, a JS-side Redis error value on failure.
 ///
-/// All 7 `cmd_*!` macros and ~24 hand-written methods (`get`, `getBuffer`,
+/// All 8 `cmd_*!` macros and ~24 hand-written methods (`get`, `getBuffer`,
 /// `set`, `incr`, `decr`, `exists`, `expire`, `ttl`, `srem`, `sadd`,
 /// `sismember`, `hmget`, `hincrby`, `hset`, `smove`, `publish`,
 /// `send_unsubscribe_request_and_cleanup`, …) duplicated this 15-line block
@@ -165,6 +165,9 @@ pub(crate) mod compile {
 // cmd_key_varargs! (key: RedisKey, ...args: RedisKey[]),
 // cmd_key_value! (key: RedisKey, value: RedisValue),
 // cmd_key_value_value2! (key: RedisKey, value: RedisValue, value2: RedisValue),
+// cmd_required_varargs! (required0: RedisValue, ..., requiredN: RedisValue, ...optional: RedisValue[])
+//   (each named argument is validated and reported by name; whatever follows
+//   is forwarded as-is, skipping undefined/null),
 // cmd_strings_varargs! (...strings: string[]),
 // cmd_key_value_varargs! (key: RedisKey, value: RedisValue, ...args: RedisValue)
 
@@ -348,6 +351,63 @@ macro_rules! cmd_key_value_value2 {
                 frame.this(),
                 $command.as_bytes(),
                 CommandArgs::Args(&[key, value, value2]),
+                CommandMeta::default(),
+                concat!("Failed to send ", $command),
+            )
+        }
+    };
+}
+
+macro_rules! cmd_required_varargs {
+    ($fn_name:ident, $name:literal, $command:literal, $($required_name:literal,)+ $state:ident) => {
+        #[bun_jsc::host_fn(method)]
+        pub fn $fn_name(
+            this: &Self,
+            global: &JSGlobalObject,
+            frame: &CallFrame,
+        ) -> JsResult<JSValue> {
+            compile::test_correct_state::<{ compile::ClientStateRequirement::$state }>(
+                this, $name,
+            )?;
+
+            const REQUIRED: &[&str] = &[$($required_name),+];
+
+            let arguments = frame.arguments();
+            let mut args: Vec<JSArgument> = Vec::with_capacity(arguments.len());
+
+            for (index, required_name) in REQUIRED.iter().copied().enumerate() {
+                let Some(required) = from_js(global, frame.argument(index))? else {
+                    return Err(global.throw_invalid_argument_type(
+                        bname($name),
+                        required_name,
+                        "string or buffer",
+                    ));
+                };
+                args.push(required);
+            }
+
+            if arguments.len() > REQUIRED.len() {
+                for arg in &arguments[REQUIRED.len()..] {
+                    if arg.is_undefined_or_null() {
+                        continue;
+                    }
+
+                    let Some(optional) = from_js(global, *arg)? else {
+                        return Err(global.throw_invalid_argument_type(
+                            bname($name),
+                            "additional arguments",
+                            "string or buffer",
+                        ));
+                    };
+                    args.push(optional);
+                }
+            }
+            send_cmd(
+                this,
+                global,
+                frame.this(),
+                $command.as_bytes(),
+                CommandArgs::Args(&args),
                 CommandMeta::default(),
                 concat!("Failed to send ", $command),
             )
@@ -1208,7 +1268,7 @@ impl JSValkeyClient {
         "key",
         NotSubscriber
     );
-    cmd_key_varargs!(hscan, b"hscan", "HSCAN", "key", NotSubscriber);
+    cmd_required_varargs!(hscan, b"hscan", "HSCAN", "key", "cursor", NotSubscriber);
     cmd_strings_varargs!(hgetdel, b"hgetdel", "HGETDEL", NotSubscriber);
     cmd_strings_varargs!(hgetex, b"hgetex", "HGETEX", NotSubscriber);
     cmd_strings_varargs!(hsetex, b"hsetex", "HSETEX", NotSubscriber);
@@ -1311,7 +1371,7 @@ impl JSValkeyClient {
         )
     }
 
-    cmd_key!(bitcount, b"bitcount", "BITCOUNT", "key", NotSubscriber);
+    cmd_required_varargs!(bitcount, b"bitcount", "BITCOUNT", "key", NotSubscriber);
     cmd_strings_varargs!(blmove, b"blmove", "BLMOVE", NotSubscriber);
     cmd_strings_varargs!(blmpop, b"blmpop", "BLMPOP", NotSubscriber);
     cmd_strings_varargs!(blpop, b"blpop", "BLPOP", NotSubscriber);
