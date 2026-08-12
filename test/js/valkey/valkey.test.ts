@@ -3414,16 +3414,14 @@ for (const connectionType of [ConnectionType.TLS, ConnectionType.TCP]) {
         const redis = ctx.redis;
         expect(async () => {
           await redis.zrem({} as any, "member");
-        }).toThrowErrorMatchingInlineSnapshot(`"Expected additional arguments to be a string or buffer for 'zrem'."`);
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'zrem'."`);
       });
 
       test("should reject invalid key in ZMSCORE", async () => {
         const redis = ctx.redis;
         expect(async () => {
           await redis.zmscore([] as any, "member");
-        }).toThrowErrorMatchingInlineSnapshot(
-          `"Expected additional arguments to be a string or buffer for 'zmscore'."`,
-        );
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'zmscore'."`);
       });
 
       test("should add members to sorted set with ZADD", async () => {
@@ -4298,7 +4296,7 @@ for (const connectionType of [ConnectionType.TLS, ConnectionType.TCP]) {
         const redis = ctx.redis;
         expect(async () => {
           await redis.zrangebylex(null as any, "-", "+");
-        }).toThrowErrorMatchingInlineSnapshot(`"The "key" argument must be specified"`);
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'zrangebylex'."`);
       });
 
       test("should return members in reverse lexicographical order with ZREVRANGEBYLEX", async () => {
@@ -4400,9 +4398,7 @@ for (const connectionType of [ConnectionType.TLS, ConnectionType.TCP]) {
         const redis = ctx.redis;
         expect(async () => {
           await redis.zrevrangebylex({} as any, "+", "-");
-        }).toThrowErrorMatchingInlineSnapshot(
-          `"Expected additional arguments to be a string or buffer for 'zrevrangebylex'."`,
-        );
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'zrevrangebylex'."`);
       });
 
       test("should reject invalid destination in ZRANGESTORE", async () => {
@@ -7130,6 +7126,38 @@ describe("RedisClient argument validation", () => {
       client.close();
     }
   });
+
+  // Every required positional of these commands used to be skipped when it was
+  // undefined/null, which shifted the arguments after it into its slot (e.g.
+  // `zrank(key, undefined, "WITHSCORE")` looked up a member called WITHSCORE,
+  // `rpush(undefined, "a", "b")` pushed "b" onto a list called "a").
+  test.each<[call: string, invoke: (client: any) => unknown, missingArgument: string]>([
+    ['hdel("h")', c => c.hdel("h"), "field"],
+    ['hdel("h", null, "f2")', c => c.hdel("h", null, "f2"), "field"],
+    ['zrem("z", undefined, "b")', c => c.zrem("z", undefined, "b"), "member"],
+    ['zrank("z", undefined, "WITHSCORE")', c => c.zrank("z", undefined, "WITHSCORE"), "member"],
+    ['zrevrank("z", null, "WITHSCORE")', c => c.zrevrank("z", null, "WITHSCORE"), "member"],
+    ['zrangebylex("z", undefined, "+")', c => c.zrangebylex("z", undefined, "+"), "min"],
+    ['zrangebylex("z", "-")', c => c.zrangebylex("z", "-"), "max"],
+    ['zrevrangebylex("z", undefined, "-")', c => c.zrevrangebylex("z", undefined, "-"), "max"],
+    ['zrevrangebylex("z", "+")', c => c.zrevrangebylex("z", "+"), "min"],
+    ['zmscore("z")', c => c.zmscore("z"), "member"],
+    ['lpush("l")', c => c.lpush("l"), "value"],
+    ['lpushx("l", null, "b")', c => c.lpushx("l", null, "b"), "value"],
+    ['rpush(undefined, "a", "b")', c => c.rpush(undefined, "a", "b"), "key"],
+    ['rpushx("l", undefined, "b")', c => c.rpushx("l", undefined, "b"), "value"],
+  ])("%s throws instead of shifting the later arguments into the empty slot", (call, invoke, missingArgument) => {
+    const client = new RedisClient("redis://127.0.0.1:1", { autoReconnect: false });
+    try {
+      const command = call.slice(0, call.indexOf("("));
+      expect(syncThrow(() => invoke(client))).toMatchObject({
+        code: "ERR_INVALID_ARG_TYPE",
+        message: `Expected ${missingArgument} to be a string or buffer for '${command}'.`,
+      });
+    } finally {
+      client.close();
+    }
+  });
 });
 
 describe("RedisClient command encoding", () => {
@@ -7248,6 +7276,42 @@ describe("RedisClient command encoding", () => {
       ["HSCAN", "h", "0", "MATCH", "field:*", "COUNT", "25"],
       ["HSCAN", "h", "0", "NOVALUES"],
       ["HSCAN", "h", "0"],
+    ]);
+  });
+
+  test("commands with required positionals still forward their variadic and option arguments", async () => {
+    const received = await recordCommands(async client => {
+      await client.hdel("h", "f1", "f2", Buffer.from("f3"));
+      await client.zrem("z", "a", "b");
+      await client.zrank("z", "a", "WITHSCORE");
+      await client.zrevrank("z", "a");
+      await client.zrangebylex("z", "-", "+", "LIMIT", 0, 10);
+      await client.zrevrangebylex("z", "+", "-", "LIMIT", "0", "10");
+      await client.zmscore("z", "a", "b", "c");
+      await client.lpush("l", "a", "b");
+      await client.lpushx("l", "a");
+      await client.rpush("l", "1", "2", "3");
+      await client.rpushx("l", "a");
+      // An undefined option after the required arguments is still skipped.
+      // @ts-expect-error: testing runtime behavior when an optional argument is passed as undefined
+      await client.zrank("z", "a", undefined);
+      // @ts-expect-error: testing runtime behavior when a variadic argument is passed as undefined
+      await client.rpush("l", "a", undefined, "b");
+    });
+    expect(received).toEqual([
+      ["HDEL", "h", "f1", "f2", "f3"],
+      ["ZREM", "z", "a", "b"],
+      ["ZRANK", "z", "a", "WITHSCORE"],
+      ["ZREVRANK", "z", "a"],
+      ["ZRANGEBYLEX", "z", "-", "+", "LIMIT", "0", "10"],
+      ["ZREVRANGEBYLEX", "z", "+", "-", "LIMIT", "0", "10"],
+      ["ZMSCORE", "z", "a", "b", "c"],
+      ["LPUSH", "l", "a", "b"],
+      ["LPUSHX", "l", "a"],
+      ["RPUSH", "l", "1", "2", "3"],
+      ["RPUSHX", "l", "a"],
+      ["ZRANK", "z", "a"],
+      ["RPUSH", "l", "a", "b"],
     ]);
   });
 });
