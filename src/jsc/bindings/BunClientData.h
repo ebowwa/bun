@@ -58,10 +58,6 @@ namespace Zig {
 class GlobalObject;
 }
 
-namespace Bun {
-class StrongRootBlock;
-}
-
 namespace WebCore {
 using namespace JSC;
 using namespace Zig;
@@ -167,18 +163,6 @@ public:
     const unsigned char* vmHandleState { nullptr };
     ALWAYS_INLINE bool scriptAllowed() const { return Bun__VmHandle__scriptAllowedInline(vmHandleState); }
     Bun::JSCTaskScheduler deferredWorkTimer;
-
-    // Linked list of StrongRootBlock cells backing bun_jsc::Strong handles
-    // (see StrongRootBlock.h). Raw pointers into the GC heap: they are rooted
-    // by a SimpleMarkingConstraint registered in JSVMClientData::create(), so
-    // no HandleSet node is needed and no GlobalObject owns them (ShadowRealm /
-    // node:vm / `bun test --isolate` globals share one list).
-    Bun::StrongRootBlock* m_strongRootBlockHead { nullptr };
-    Bun::StrongRootBlock* m_strongRootBlockFree { nullptr };
-    // Last block acquire() found room in; always on the active list (cleared by
-    // release() if unlinked), so it is already rooted via m_strongRootBlockHead.
-    Bun::StrongRootBlock* m_strongRootBlockCursor { nullptr };
-    JSC::Structure* m_strongRootBlockStructure { nullptr };
 
     // Backing storage for Bun::IsolatedModuleCache (see IsolatedModuleCache.h).
     // All access should go through that class. Stored as the JSC base type to

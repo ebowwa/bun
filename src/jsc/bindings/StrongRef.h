@@ -2,24 +2,21 @@
 #include <JavaScriptCore/JSCJSValue.h>
 #include <memory>
 
-namespace Bun {
-// One occupied slot in a StrongRootBlock; see StrongRef.cpp.
-struct StrongRefImpl;
-}
-
-extern "C" void Bun__StrongRef__delete(Bun::StrongRefImpl* _Nonnull ref);
-extern "C" Bun::StrongRefImpl* Bun__StrongRef__new(JSC::JSGlobalObject* globalObject, JSC::EncodedJSValue encodedValue);
-extern "C" void Bun__StrongRef__set(Bun::StrongRefImpl* _Nonnull ref, JSC::JSGlobalObject* globalObject, JSC::EncodedJSValue encodedValue);
+// One slot in the VM's JSC::StrongSet, the storage JSC::Strong<> itself uses.
+// The slot pointer is the handle: bun_jsc::Strong (Strong.rs) reads and writes
+// the JSValue through it directly and only comes back here to release it.
+extern "C" void Bun__StrongRef__delete(JSC::JSValue* _Nonnull slot);
+extern "C" JSC::JSValue* Bun__StrongRef__new(JSC::JSGlobalObject* globalObject, JSC::EncodedJSValue encodedValue);
 
 namespace Bun {
 
 struct StrongRefDeleter {
-    void operator()(StrongRefImpl* _Nonnull ref)
+    void operator()(JSC::JSValue* _Nonnull slot)
     {
-        Bun__StrongRef__delete(ref);
+        Bun__StrongRef__delete(slot);
     }
 };
 
-using StrongRef = std::unique_ptr<StrongRefImpl, StrongRefDeleter>;
+using StrongRef = std::unique_ptr<JSC::JSValue, StrongRefDeleter>;
 
 }
