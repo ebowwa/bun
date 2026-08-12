@@ -748,32 +748,32 @@ function getVerifyBaselineStep(platform, options) {
 }
 
 /**
- * Targets whose build lane cross-compiles (so `canTraceOrderFile()` is false)
- * but whose test fleet is native. A `-trace-order` step runs there, downloads
- * the cross-built `bun-profile`, traces it, and uploads the `.order` artifact
- * that the next build's `inheritOrderFile()` picks up. One build of lag.
- *
- * linux-aarch64 is absent because its build lane runs on the aarch64 host and
- * traces itself; `packageAndUpload()` is its sole publisher.
+ * Every target that links with a symbol order file (`usesOrderFile()` in
+ * scripts/build/flags.ts), and the native test platform its `-trace-order`
+ * step runs on. That step is the only publisher of the `.order` artifact the
+ * next build's `inheritOrderFile()` downloads, so every target needs one,
+ * including linux-aarch64, whose build lane is native: a canary lane inherits
+ * rather than paying a second LTO link, so it only traces for a release, and
+ * without this step its canaries kept re-inheriting one release's trace.
  */
 const traceOrderTargets = [
   { os: "darwin", arch: "aarch64", on: { os: "darwin", arch: "aarch64", release: "26", tier: "latest" } },
+  { os: "linux", arch: "aarch64", on: { os: "linux", arch: "aarch64", distro: "debian", release: "13" } },
   { os: "linux", arch: "x64", on: { os: "linux", arch: "x64", distro: "debian", release: "13" } },
 ];
 
 /**
- * Trace the symbol order file for a cross-compiled target on a native-arch
- * host, so the next build's `inheritOrderFile()` has something to download.
+ * Trace the symbol order file for a target on its native test fleet, so the
+ * next build's `inheritOrderFile()` has something to download. One build of
+ * lag.
  *
- * The build lane cross-compiles from the aarch64 `buildHostPlatform` and cannot
- * run the binary it linked. This step runs on the target-arch test fleet,
- * downloads that lane's unstripped `bun-profile`, runs it under `scripts/
+ * Downloads the build lane's unstripped `bun-profile`, runs it under `scripts/
  * orderfile/generate.ts` (the traced binary doubles as the interpreter), and
  * uploads the result.
  *
- * Non-PR only — `orderFileEligible()` ignores PR builds, so a trace there has
- * no consumer. Soft-fail: the order file is an optimization, and a broken
- * tracer must not fail a build.
+ * Main only, unless opted into (see getPipeline): `orderFileEligible()` ignores
+ * PR builds, so a trace there has no consumer. Soft-fail: the order file is an
+ * optimization, and a broken tracer must not fail a build.
  * @param {Target} target
  * @param {Platform} tracePlatform
  * @param {PipelineOptions} options
@@ -1542,12 +1542,12 @@ async function getPipeline(options = {}) {
           steps.push(getStepWithDependsOn(getVerifyBaselineStep(target, options), ...verifyDeps));
         }
 
-        // Seed the symbol order file for a cross-compiled target on its native
-        // test fleet (see getTraceOrderStep). Always on main so the inheritance
-        // chain stays fed, and anywhere else on commit-message opt-in so a PR
-        // that changes the tracer can prove the step works before merge — the
-        // same `[generate symbol order]` tag ci.ts already honours. Release
-        // profile only — usesOrderFile() is false under a sanitizer anyway.
+        // Publish the target's symbol order file from its native test fleet
+        // (see getTraceOrderStep). Always on main so the inheritance chain
+        // stays fed, and anywhere else on commit-message opt-in so a PR that
+        // changes the tracer can prove the step works before merge — the same
+        // `[generate symbol order]` tag ci.ts already honours. Release profile
+        // only — usesOrderFile() is false under a sanitizer anyway.
         const traceOn = traceOrderTargets.find(
           t =>
             t.os === target.os && t.arch === target.arch && !target.abi && (target.profile ?? "release") === "release",
