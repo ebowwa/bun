@@ -124,7 +124,7 @@ fn promise_to_js(p: *mut JSPromise) -> JSValue {
 /// `this.send()` it, and convert the result to a `JsResult<JSValue>` —
 /// `Ok(promise.toJS())` on success, a JS-side Redis error value on failure.
 ///
-/// All 7 `cmd_*!` macros and ~24 hand-written methods (`get`, `getBuffer`,
+/// All 6 `cmd_*!` macros and ~24 hand-written methods (`get`, `getBuffer`,
 /// `set`, `incr`, `decr`, `exists`, `expire`, `ttl`, `srem`, `sadd`,
 /// `sismember`, `hmget`, `hincrby`, `hset`, `smove`, `publish`,
 /// `send_unsubscribe_request_and_cleanup`, …) duplicated this 15-line block
@@ -185,16 +185,10 @@ pub(crate) mod compile {
 // Note: each command-shape generator is a `macro_rules!` that emits a
 // `#[bun_jsc::host_fn(method)]` inside the `impl JSValkeyClient` block:
 // cmd_noargs! (), cmd_key! (key: RedisKey),
-// cmd_key_varargs! (key: RedisKey, ...args: RedisKey[]),
 // cmd_key_value! (key: RedisKey, value: RedisValue),
 // cmd_key_value_value2! (key: RedisKey, value: RedisValue, value2: RedisValue),
 // cmd_required_varargs! (required0: RedisValue, ..., requiredN: RedisValue, ...optional: RedisValue[]),
 // cmd_strings_varargs! (...strings: string[]),
-//
-// cmd_key_varargs! is for commands whose only required argument is the key;
-// a command with further required positionals uses cmd_required_varargs! so
-// that an undefined/null positional is rejected instead of being skipped (which
-// would shift the arguments that follow it into the wrong slots).
 
 macro_rules! cmd_noargs {
     ($fn_name:ident, $name:literal, $command:literal, $state:ident) => {
@@ -245,52 +239,6 @@ macro_rules! cmd_key {
                 frame.this(),
                 $command.as_bytes(),
                 CommandArgs::Args(&[key]),
-                CommandMeta::default(),
-                concat!("Failed to send ", $command),
-            )
-        }
-    };
-}
-
-macro_rules! cmd_key_varargs {
-    ($fn_name:ident, $name:literal, $command:literal, $arg0_name:literal, $state:ident) => {
-        #[bun_jsc::host_fn(method)]
-        pub fn $fn_name(
-            this: &Self,
-            global: &JSGlobalObject,
-            frame: &CallFrame,
-        ) -> JsResult<JSValue> {
-            compile::test_correct_state::<{ compile::ClientStateRequirement::$state }>(
-                this, $name,
-            )?;
-
-            if frame.argument(0).is_undefined_or_null() {
-                return Err(global.throw_missing_arguments_value(&[$arg0_name]));
-            }
-
-            let arguments = frame.arguments();
-            let mut args: Vec<JSArgument> = Vec::with_capacity(arguments.len());
-
-            for arg in arguments {
-                if arg.is_undefined_or_null() {
-                    continue;
-                }
-
-                let Some(another) = from_js(global, *arg)? else {
-                    return Err(global.throw_invalid_argument_type(
-                        bname($name),
-                        "additional arguments",
-                        "string or buffer",
-                    ));
-                };
-                args.push(another);
-            }
-            send_cmd(
-                this,
-                global,
-                frame.this(),
-                $command.as_bytes(),
-                CommandArgs::Args(&args),
                 CommandMeta::default(),
                 concat!("Failed to send ", $command),
             )
@@ -1235,7 +1183,7 @@ impl JSValkeyClient {
     }
 
     cmd_required_varargs!(hdel, b"hdel", "HDEL", "key", "field", NotSubscriber);
-    cmd_key_varargs!(
+    cmd_required_varargs!(
         hrandfield,
         b"hrandfield",
         "HRANDFIELD",
@@ -1415,7 +1363,7 @@ impl JSValkeyClient {
     cmd_key!(llen, b"llen", "LLEN", "key", NotSubscriber);
     cmd_strings_varargs!(lmove, b"lmove", "LMOVE", NotSubscriber);
     cmd_strings_varargs!(lmpop, b"lmpop", "LMPOP", NotSubscriber);
-    cmd_key_varargs!(lpop, b"lpop", "LPOP", "key", NotSubscriber);
+    cmd_required_varargs!(lpop, b"lpop", "LPOP", "key", NotSubscriber);
     cmd_strings_varargs!(lpos, b"lpos", "LPOS", NotSubscriber);
     cmd_key_value_value2!(
         lrange,
@@ -1479,7 +1427,7 @@ impl JSValkeyClient {
     );
     cmd_key!(pttl, b"pttl", "PTTL", "key", NotSubscriber);
     cmd_noargs!(randomkey, b"randomkey", "RANDOMKEY", NotSubscriber);
-    cmd_key_varargs!(rpop, b"rpop", "RPOP", "key", NotSubscriber);
+    cmd_required_varargs!(rpop, b"rpop", "RPOP", "key", NotSubscriber);
     cmd_key_value!(
         rpoplpush,
         b"rpoplpush",
@@ -1520,9 +1468,9 @@ impl JSValkeyClient {
         "max",
         NotSubscriber
     );
-    cmd_key_varargs!(zpopmax, b"zpopmax", "ZPOPMAX", "key", NotSubscriber);
-    cmd_key_varargs!(zpopmin, b"zpopmin", "ZPOPMIN", "key", NotSubscriber);
-    cmd_key_varargs!(
+    cmd_required_varargs!(zpopmax, b"zpopmax", "ZPOPMAX", "key", NotSubscriber);
+    cmd_required_varargs!(zpopmin, b"zpopmin", "ZPOPMIN", "key", NotSubscriber);
+    cmd_required_varargs!(
         zrandmember,
         b"zrandmember",
         "ZRANDMEMBER",
@@ -1643,8 +1591,8 @@ impl JSValkeyClient {
     cmd_strings_varargs!(bzmpop, b"bzmpop", "BZMPOP", NotSubscriber);
     cmd_strings_varargs!(bzpopmin, b"bzpopmin", "BZPOPMIN", NotSubscriber);
     cmd_strings_varargs!(bzpopmax, b"bzpopmax", "BZPOPMAX", NotSubscriber);
-    cmd_key_varargs!(del, b"del", "DEL", "key", NotSubscriber);
-    cmd_key_varargs!(mget, b"mget", "MGET", "key", NotSubscriber);
+    cmd_required_varargs!(del, b"del", "DEL", "key", NotSubscriber);
+    cmd_required_varargs!(mget, b"mget", "MGET", "key", NotSubscriber);
     cmd_strings_varargs!(mset, b"mset", "MSET", NotSubscriber);
     cmd_strings_varargs!(msetnx, b"msetnx", "MSETNX", NotSubscriber);
     cmd_strings_varargs!(script, b"script", "SCRIPT", NotSubscriber);
@@ -1761,8 +1709,8 @@ impl JSValkeyClient {
     );
     cmd_strings_varargs!(pubsub, b"pubsub", "PUBSUB", DontCare);
     cmd_strings_varargs!(copy, b"copy", "COPY", NotSubscriber);
-    cmd_key_varargs!(unlink, b"unlink", "UNLINK", "key", NotSubscriber);
-    cmd_key_varargs!(touch, b"touch", "TOUCH", "key", NotSubscriber);
+    cmd_required_varargs!(unlink, b"unlink", "UNLINK", "key", NotSubscriber);
+    cmd_required_varargs!(touch, b"touch", "TOUCH", "key", NotSubscriber);
     cmd_key_value!(rename, b"rename", "RENAME", "key", "newkey", NotSubscriber);
     cmd_key_value!(
         renamenx,

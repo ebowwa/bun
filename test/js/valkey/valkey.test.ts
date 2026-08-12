@@ -1009,7 +1009,7 @@ for (const connectionType of [ConnectionType.TLS, ConnectionType.TCP]) {
         const redis = ctx.redis;
         expect(async () => {
           await redis.unlink({} as any);
-        }).toThrowErrorMatchingInlineSnapshot(`"Expected additional arguments to be a string or buffer for 'unlink'."`);
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'unlink'."`);
       });
 
       test("should reject invalid additional key in UNLINK", async () => {
@@ -1023,7 +1023,7 @@ for (const connectionType of [ConnectionType.TLS, ConnectionType.TCP]) {
         const redis = ctx.redis;
         expect(async () => {
           await redis.touch(null as any);
-        }).toThrowErrorMatchingInlineSnapshot(`"The "key" argument must be specified"`);
+        }).toThrowErrorMatchingInlineSnapshot(`"Expected key to be a string or buffer for 'touch'."`);
       });
 
       test("should reject invalid additional key in TOUCH", async () => {
@@ -7146,6 +7146,10 @@ describe("RedisClient argument validation", () => {
     ['lpushx("l", null, "b")', c => c.lpushx("l", null, "b"), "value"],
     ['rpush(undefined, "a", "b")', c => c.rpush(undefined, "a", "b"), "key"],
     ['rpushx("l", undefined, "b")', c => c.rpushx("l", undefined, "b"), "value"],
+    // Commands whose only required argument is the key use the same generator and report it by name too.
+    ["del()", c => c.del(), "key"],
+    ['mget(null, "b")', c => c.mget(null, "b"), "key"],
+    ["lpop({})", c => c.lpop({}), "key"],
   ])("%s throws instead of shifting the later arguments into the empty slot", (call, invoke, missingArgument) => {
     const client = new RedisClient("redis://127.0.0.1:1", { autoReconnect: false });
     try {
@@ -7292,11 +7296,16 @@ describe("RedisClient command encoding", () => {
       await client.lpushx("l", "a");
       await client.rpush("l", "1", "2", "3");
       await client.rpushx("l", "a");
+      await client.del("a", "b", "c");
+      await client.lpop("l", 2);
+      await client.hrandfield("h", 2, "WITHVALUES");
       // An undefined option after the required arguments is still skipped.
       // @ts-expect-error: testing runtime behavior when an optional argument is passed as undefined
       await client.zrank("z", "a", undefined);
       // @ts-expect-error: testing runtime behavior when a variadic argument is passed as undefined
       await client.rpush("l", "a", undefined, "b");
+      // @ts-expect-error: testing runtime behavior when the optional count is passed as undefined
+      await client.lpop("l", undefined);
     });
     expect(received).toEqual([
       ["HDEL", "h", "f1", "f2", "f3"],
@@ -7310,8 +7319,12 @@ describe("RedisClient command encoding", () => {
       ["LPUSHX", "l", "a"],
       ["RPUSH", "l", "1", "2", "3"],
       ["RPUSHX", "l", "a"],
+      ["DEL", "a", "b", "c"],
+      ["LPOP", "l", "2"],
+      ["HRANDFIELD", "h", "2", "WITHVALUES"],
       ["ZRANK", "z", "a"],
       ["RPUSH", "l", "a", "b"],
+      ["LPOP", "l"],
     ]);
   });
 });
