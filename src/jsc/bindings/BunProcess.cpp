@@ -476,12 +476,10 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionDlopen, (JSC::JSGlobalObject * globalOb
         BunString bunStr = Bun::toString(filename);
         if (Bun__resolveEmbeddedNodeFile(globalObject->bunVM(), &bunStr)) {
             filename = bunStr.transferToWTFString();
-            // Pre-#29587, extraction wrote a fresh /tmp file per dlopen (see
-            // #19550), so we unlinked immediately after dlopen to avoid leaks.
-            // `resolveEmbeddedFile` now dedupes via a content-hashed path;
-            // deleting the file out from under that dedup would defeat the
-            // fix. Keep Windows' delete-on-reboot for hygiene (NTFS can't
-            // unlink an in-use file); POSIX leaves the tmpfile alone.
+            // The extracted file is content-hashed and shared across dlopens
+            // and restarts (#29587), so POSIX must not unlink it. Windows
+            // still marks it for delete-on-reboot (NTFS cannot unlink an
+            // in-use file).
 #if OS(WINDOWS)
             deleteAfter = true;
 #endif

@@ -4953,26 +4953,14 @@ unsafe fn transpile_virtual_module(
 }
 
 /// Materialise an embedded file (`.node`/`.so`/`.dylib`/`.dll` from
-/// `bun build --compile`) to a real on-disk path `dlopen(2)` can open.
+/// `bun build --compile`) to an on-disk path `dlopen(2)` can open. Called
+/// from `resolve_embedded_node_file_hook` (`process.dlopen()`) and
+/// `ffi_body::FFI::open` (`bun:ffi`).
 ///
-/// Called from:
-///   - `resolve_embedded_node_file_hook` (`process.dlopen()`, extname `"node"`)
-///   - `bun:ffi` `dlopen()` on an embedded `with { type: "file" }` library
-///     (`ffi_body::FFI::open`, extname `"so"`/`"dylib"`/`"dll"`)
-///
-/// The extracted filename is a content hash, so repeated `dlopen()`s of the
-/// same embedded library — within one process, across Worker VMs that share
-/// the graph, and across restarts of the same compiled binary — share one
-/// on-disk file instead of leaking a fresh copy per call (#29585). The path is
-/// a pure function of the file's contents, so it is recomputed each call (a
-/// re-hash of bytes already in memory plus one `lstat`) rather than cached:
-/// dedup comes from the deterministic name, not from state.
-///
-/// If another user has squatted the canonical path on a shared `/tmp`, we
-/// fall back to the scratch path we wrote this call.
-///
-/// Returns `None` when the input is empty, not present in the graph, or a
-/// filesystem step fails.
+/// The filename is a hash of the contents, so every `dlopen()` of the same
+/// embedded library — across calls, Worker VMs, and restarts — shares one
+/// file instead of leaking a copy per call (#29585). Returns `None` when the
+/// input is empty, absent from the graph, or a filesystem step fails.
 pub(crate) fn resolve_embedded_file_to_buf(
     input_path: &[u8],
     extname: &[u8],
@@ -4982,20 +4970,15 @@ pub(crate) fn resolve_embedded_file_to_buf(
         return None;
     }
 
-    // `Graph::get()` hands out a non-unique `*mut` to the process-lifetime
-    // singleton. We only read `file.contents`, so form a shared `&` (never
-    // `&mut`) — matching the read-only-after-init convention the other
-    // `Graph::get()` callers follow, with no lock needed.
     let graph = bun_standalone_graph::Graph::get()?;
-    // SAFETY: `graph` is the `UnsafeCell::get()` pointer to the singleton; the
-    // shared `&` below reads only immutable-after-init fields.
+    // SAFETY: `graph` is the `UnsafeCell::get()` pointer to the process-
+    // lifetime singleton; the shared `&` reads only immutable-after-init
+    // fields, so it cannot alias a `&mut` from other `Graph::get()` callers.
     let file = (unsafe { &*graph }).find_ref(input_path)?;
     let file_contents: &[u8] = file.contents.as_bytes();
 
-    // Canonical deterministic name: `.bun-{uid}-{wyhash(contents)}.{ext}`.
-    // The uid in the filename makes names uid-specific so a multi-user
-    // `/tmp` doesn't silently collide between users; the content hash does
-    // the dedup.
+    // `.bun-{uid}-{wyhash(contents)}.{ext}`: the hash dedupes; the uid keeps
+    // users on a shared `/tmp` from colliding.
     let content_hash = bun_wyhash::hash(file_contents);
     let uid = extract_owner_uid();
     let mut canonical_name_buf = [0u8; 64];
@@ -5006,13 +4989,9 @@ pub(crate) fn resolve_embedded_file_to_buf(
         canonical_name_len - 1,
     );
 
-    // If a previous run of this binary already wrote the canonical file
-    // and it's still ours with the right size, skip the write — just
-    // resolve the path.
-    //
-    // `lstatat` (not `fstatat`) so an attacker-planted symlink at the
-    // canonical name is seen as a symlink (fails the ISREG check) rather
-    // than being followed to its target.
+    // Reuse the canonical file from a previous run if it is still ours with
+    // the right size. `lstatat` so a planted symlink fails the ISREG check
+    // instead of being followed.
     let tmpdir = (*Fs::FileSystem::instance()).tmpdir().ok()?;
     let tmpdir_fd: bun_sys::Fd = tmpdir.fd;
     if let Ok(st) = bun_sys::lstatat(tmpdir_fd, canonical_name) {
@@ -5031,7 +5010,6 @@ pub(crate) fn resolve_embedded_file_to_buf(
     }
 
     // Write to a unique scratch name, then atomically rename it into place.
-    // The scratch name is safe even if the canonical path is squatted.
     let mut scratch_buf = bun_paths::path_buffer_pool::get();
     let scratch_name = Fs::FileSystem::tmpname(extname, &mut scratch_buf[..], content_hash).ok()?;
 
@@ -5058,10 +5036,8 @@ pub(crate) fn resolve_embedded_file_to_buf(
         return None;
     }
 
-    // Try to rename the scratch file to the content-hashed canonical path.
-    // On a shared `/tmp` with the sticky bit, this will fail EACCES/EPERM
-    // if another user owns a file at the destination — in which case we
-    // just use the scratch file directly.
+    // On sticky `/tmp` the rename fails EACCES/EPERM when another user owns
+    // the destination; fall back to the scratch file.
     let rename_ok = tmpfile.finish(canonical_name).is_ok();
     let _ = bun_sys::close(tmpfile_fd);
 
@@ -5118,10 +5094,8 @@ fn format_canonical_name(
     Some(cursor.len)
 }
 
-/// `geteuid` (not `getuid`) on POSIX because `open(2)` sets the owner to
-/// euid — a setuid-compiled binary where euid != ruid would otherwise
-/// create a file whose owner != `getuid()` and fail the `lstatat`
-/// ownership check.
+/// euid, not uid: `open(2)` sets the new file's owner to euid, so a
+/// `getuid()` check would never match in a setuid binary.
 #[cfg(unix)]
 fn extract_owner_uid() -> u32 {
     // SAFETY: `geteuid` takes no arguments and cannot fail.
@@ -5133,11 +5107,9 @@ fn extract_owner_uid() -> u32 {
     bun_sys::windows::user_unique_id()
 }
 
-/// `LoaderHooks::resolve_embedded_node_file` body — `ModuleLoader.resolveEmbeddedFile`
-/// for the `process.dlopen()`-on-a-compiled-executable path. Delegates to
+/// `LoaderHooks::resolve_embedded_node_file` body: delegates to
 /// [`resolve_embedded_file_to_buf`] with `extname = "node"` and writes the
-/// resulting on-disk path back into `*in_out_str`
-/// (as an owned UTF-8 clone).
+/// on-disk path back into `*in_out_str`.
 ///
 /// # Safety
 /// `vm` is the live per-thread VM; `in_out_str` is a valid in/out
