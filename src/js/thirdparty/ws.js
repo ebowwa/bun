@@ -26,8 +26,7 @@ function sendAfterClose(state, cb) {
   }
 }
 
-// npm ws's Receiver does `maxPayload | 0` and skips the check below 1, so an
-// explicit undefined/null/0 is unlimited (0 here), not the 100 MiB default.
+// 0 = unlimited, as in npm ws's Receiver.
 function normalizeMaxPayload(maxPayload) {
   return typeof maxPayload === "number" && maxPayload >= 1 ? Math.floor(maxPayload) : 0;
 }
