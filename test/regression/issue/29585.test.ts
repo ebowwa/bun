@@ -34,11 +34,45 @@ async function findExtractedCopies(root: string, expected: Buffer): Promise<stri
   return matches;
 }
 
+const LIBHELLO_C = "int hello(void) { return 42; }\n";
+
+// Builds `libhello.so` from `libhello.c` and compiles `app.ts` into a
+// standalone binary at `{cwd}/app`. Returns the binary path and the .so bytes
+// for content-matching.
+async function buildFixture(cwd: string): Promise<{ out: string; libBytes: Buffer }> {
+  {
+    // gcc/clang/ld can emit benign notes on success, so only assert exit code.
+    await using proc = Bun.spawn({
+      cmd: [cc!, "-shared", "-fPIC", "-o", "libhello.so", "libhello.c"],
+      cwd,
+      env: bunEnv,
+    });
+    expect(await proc.exited).toBe(0);
+  }
+
+  const libBytes = Buffer.from(await Bun.file(join(cwd, "libhello.so")).arrayBuffer());
+
+  const out = join(cwd, "app");
+  {
+    await using proc = Bun.spawn({
+      cmd: [bunExe(), "build", "--compile", "--outfile", out, "app.ts"],
+      cwd,
+      env: bunEnv,
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    const [, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect(stderr).not.toContain("error:");
+    expect(exitCode).toBe(0);
+  }
+  return { out, libBytes };
+}
+
 test.skipIf(!isLinux || !cc)(
   "compiled binary deduplicates extracted embedded .so across dlopen calls + process restarts (#29585)",
   async () => {
     using dir = tempDir("29585", {
-      "libhello.c": "int hello(void) { return 42; }\n",
+      "libhello.c": LIBHELLO_C,
 
       // Each dlopen() pre-fix wrote a fresh file to /tmp; post-fix they all
       // share the content-hashed path `{tmpdir}/.bun-{uid}-{hash}.so`.
@@ -54,34 +88,7 @@ test.skipIf(!isLinux || !cc)(
       `,
     });
     const cwd = String(dir);
-
-    // Build the .so. gcc/clang/ld can emit benign notes on success, so we only
-    // assert the exit code.
-    {
-      await using proc = Bun.spawn({
-        cmd: [cc!, "-shared", "-fPIC", "-o", "libhello.so", "libhello.c"],
-        cwd,
-        env: bunEnv,
-      });
-      expect(await proc.exited).toBe(0);
-    }
-
-    const libBytes = Buffer.from(await Bun.file(join(cwd, "libhello.so")).arrayBuffer());
-
-    // Build the compiled binary.
-    const out = join(cwd, "app");
-    {
-      await using proc = Bun.spawn({
-        cmd: [bunExe(), "build", "--compile", "--outfile", out, "app.ts"],
-        cwd,
-        env: bunEnv,
-        stderr: "pipe",
-        stdout: "pipe",
-      });
-      const [, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
-      expect(stderr).not.toContain("error:");
-      expect(exitCode).toBe(0);
-    }
+    const { out, libBytes } = await buildFixture(cwd);
 
     // Isolate extraction so concurrent runs (or anything else in /tmp) can't
     // interfere. BUN_TMPDIR wins inside bun; TMPDIR covers libc.
@@ -133,7 +140,7 @@ test.skipIf(!isLinux || !cc || !isDebug)(
   "compiled binary's Workers share one extracted .so (#29585)",
   async () => {
     using dir = tempDir("29585-workers", {
-      "libhello.c": "int hello(void) { return 42; }\n",
+      "libhello.c": LIBHELLO_C,
       "app.ts": `
         import { dlopen, FFIType } from "bun:ffi";
         import lib from "./libhello.so" with { type: "file" };
@@ -161,31 +168,7 @@ test.skipIf(!isLinux || !cc || !isDebug)(
       `,
     });
     const cwd = String(dir);
-
-    {
-      await using proc = Bun.spawn({
-        cmd: [cc!, "-shared", "-fPIC", "-o", "libhello.so", "libhello.c"],
-        cwd,
-        env: bunEnv,
-      });
-      expect(await proc.exited).toBe(0);
-    }
-
-    const libBytes = Buffer.from(await Bun.file(join(cwd, "libhello.so")).arrayBuffer());
-
-    const out = join(cwd, "app");
-    {
-      await using proc = Bun.spawn({
-        cmd: [bunExe(), "build", "--compile", "--outfile", out, "app.ts"],
-        cwd,
-        env: bunEnv,
-        stderr: "pipe",
-        stdout: "pipe",
-      });
-      const [, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
-      expect(stderr).not.toContain("error:");
-      expect(exitCode).toBe(0);
-    }
+    const { out, libBytes } = await buildFixture(cwd);
 
     using extractRoot = tempDir("29585-workers-extract", {});
     const extractDir = String(extractRoot);

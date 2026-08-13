@@ -140,22 +140,32 @@ describe.concurrent.skipIf(!canBuildNodeAddons())("napi", () => {
               stderr: "inherit",
             });
             expect(build.success).toBeTrue();
-            // Pre-#29587 this test asserted the tmpdir was empty after exit,
-            // because the .node extraction immediately unlink'd the copy
-            // (see #19550). Since #29587 the extracted `.node` persists at a
-            // content-hashed path so repeated loads share it — dedup is
-            // covered by test/regression/issue/29585.test.ts, so here we
-            // just assert the compiled binary loads its embedded addons.
-            const result = spawnSync({
-              cmd: [exe, "self"],
-              env: bunEnv,
-              stdin: "inherit",
-              stderr: "inherit",
-              stdout: "pipe",
-            });
+            // Since #29587 each extracted `.node` persists at a content-hashed
+            // path shared across runs (pre-#29587 it was unlinked per load,
+            // see #19550), so a second run must not extract new copies.
+            await using tmpdir = tempDir("napi-compile-extract-" + format, {});
+            const runEnv = { ...bunEnv, BUN_TMPDIR: String(tmpdir), TMPDIR: String(tmpdir) };
+            const runSelf = () =>
+              spawnSync({
+                cmd: [exe, "self"],
+                env: runEnv,
+                stdin: "inherit",
+                stderr: "inherit",
+                stdout: "pipe",
+              });
+            const result = runSelf();
             const stdout = result.stdout.toString().trim();
             expect(stdout).toBe("hello world!");
             expect(result.success).toBeTrue();
+            if (process.platform !== "win32") {
+              const extractedCount = () => readdirSync(String(tmpdir)).filter(f => f.endsWith(".node")).length;
+              const count = extractedCount();
+              expect(count).toBeGreaterThan(0);
+              const again = runSelf();
+              expect(again.stdout.toString().trim()).toBe("hello world!");
+              expect(again.success).toBeTrue();
+              expect(extractedCount()).toBe(count);
+            }
           },
           // CI runs tests under bun-profile (~700 MB on linux with ThinLTO
           // DWARF); --compile copies+reads+rewrites the whole thing to /tmp,
