@@ -49,6 +49,60 @@ describe("WebSocketServer maxPayload", () => {
     }
   });
 
+  it.concurrent("rejects an oversized text message the same way as a binary one", async () => {
+    const wss = new WebSocketServer({ port: 0, maxPayload: SMALL });
+    const serverOutcome = Promise.withResolvers<{ type: string; code?: string; length?: number }>();
+    const clientClose = Promise.withResolvers<number>();
+
+    wss.on("connection", serverWs => {
+      serverWs.on("message", m => serverOutcome.resolve({ type: "message", length: (m as Buffer).length }));
+      serverWs.on("error", (err: any) => serverOutcome.resolve({ type: err.constructor.name, code: err.code }));
+    });
+
+    const ws = new WebSocket("ws://127.0.0.1:" + (wss.address() as AddressInfo).port);
+    ws.on("open", () => ws.send(Buffer.alloc(SMALL + 1, "A").toString()));
+    ws.on("close", code => clientClose.resolve(code));
+    ws.on("error", () => {});
+
+    try {
+      expect(await serverOutcome.promise).toEqual({ type: "RangeError", code: "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" });
+      expect(await clientClose.promise).toBe(1009);
+    } finally {
+      ws.close();
+      wss.close();
+    }
+  });
+
+  // npm `ws` flips the socket to CLOSING before emitting 'error' (receiverOnError), so
+  // close()/send() inside the handler are no-ops and the 1009 close frame still goes out.
+  it.concurrent("is CLOSING inside the error handler and keeps 1009 when the handler calls close()", async () => {
+    const wss = new WebSocketServer({ port: 0, maxPayload: SMALL });
+    const serverOutcome = Promise.withResolvers<{ readyStateInHandler: number; closeCode: number }>();
+    const clientClose = Promise.withResolvers<number>();
+
+    wss.on("connection", serverWs => {
+      let readyStateInHandler = -1;
+      serverWs.on("error", () => {
+        readyStateInHandler = serverWs.readyState;
+        serverWs.close(1000, "ignored");
+      });
+      serverWs.on("close", closeCode => serverOutcome.resolve({ readyStateInHandler, closeCode }));
+    });
+
+    const ws = new WebSocket("ws://127.0.0.1:" + (wss.address() as AddressInfo).port);
+    ws.on("open", () => ws.send(new Uint8Array(SMALL + 1)));
+    ws.on("close", code => clientClose.resolve(code));
+    ws.on("error", () => {});
+
+    try {
+      expect(await serverOutcome.promise).toEqual({ readyStateInHandler: WebSocket.CLOSING, closeCode: 1009 });
+      expect(await clientClose.promise).toBe(1009);
+    } finally {
+      ws.close();
+      wss.close();
+    }
+  });
+
   // Just over Bun.serve's 16 MiB websocket default, to prove the native cap is
   // raised without shipping a needlessly large payload through a debug build.
   const BIG = 17 * 1024 * 1024;
