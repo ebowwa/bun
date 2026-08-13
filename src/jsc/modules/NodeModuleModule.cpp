@@ -1228,9 +1228,8 @@ JSC::JSObject* generateNativeModule_NodeModule(JSC::JSGlobalObject* lexicalGloba
     auto& vm = JSC::getVM(globalObject);
     auto* constructor = globalObject->m_nodeModuleConstructor.getInitializedOnMainThread(globalObject);
 
-    // The exports are the static table's enumerable entries, i.e. Object.keys(Module): not the constructor's
-    // other own properties (`length`, `name`, whatever user code assigned onto Module), and not the DontEnum
-    // entries (`prototype`, `wrap`, `wrapper`, `_stat`), which Node's namespace does not export either.
+    // The exports are the static table's enumerable entries, i.e. Object.keys(Module), as in Node: not `length`,
+    // `name` or whatever user code assigned onto Module, and not the DontEnum entries.
     PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings, PrivateSymbolMode::Exclude);
     for (const auto& entry : Bun::nodeModuleObjectTableValues) {
         if (entry.attributes() & PropertyAttribute::DontEnum)
