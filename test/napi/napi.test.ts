@@ -157,15 +157,13 @@ describe.concurrent.skipIf(!canBuildNodeAddons())("napi", () => {
             const stdout = result.stdout.toString().trim();
             expect(stdout).toBe("hello world!");
             expect(result.success).toBeTrue();
-            if (process.platform !== "win32") {
-              const extractedCount = () => readdirSync(String(tmpdir)).filter(f => f.endsWith(".node")).length;
-              const count = extractedCount();
-              expect(count).toBeGreaterThan(0);
-              const again = runSelf();
-              expect(again.stdout.toString().trim()).toBe("hello world!");
-              expect(again.success).toBeTrue();
-              expect(extractedCount()).toBe(count);
-            }
+            const extractedCount = () => readdirSync(String(tmpdir)).filter(f => f.endsWith(".node")).length;
+            const count = extractedCount();
+            expect(count).toBeGreaterThan(0);
+            const again = runSelf();
+            expect(again.stdout.toString().trim()).toBe("hello world!");
+            expect(again.success).toBeTrue();
+            expect(extractedCount()).toBe(count);
           },
           // CI runs tests under bun-profile (~700 MB on linux with ThinLTO
           // DWARF); --compile copies+reads+rewrites the whole thing to /tmp,
