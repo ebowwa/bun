@@ -1077,19 +1077,22 @@ class BunWebSocketMocked extends EventEmitter {
   }
 
   #close(ws, code, reason) {
-    this.#state = ReadyState_CLOSED;
     this.#ws = null;
 
-    // Bun.serve's native maxPayloadLength force-close: surface as ws's RangeError + 1009.
+    // Bun.serve's native maxPayloadLength force-close: surface as ws's RangeError + 1009,
+    // with the same CLOSING-during-'error' state as the #message path.
     if (code === 1006 && typeof reason === "string" && reason.startsWith("Received too big message")) {
+      this.#state = ReadyState_CLOSING;
       try {
         this.emit("error", createMaxPayloadError());
       } finally {
+        this.#state = ReadyState_CLOSED;
         this.emit("close", 1009, "");
       }
       return;
     }
 
+    this.#state = ReadyState_CLOSED;
     this.emit("close", code, reason);
   }
 

@@ -1055,34 +1055,43 @@ describe("WebSocketServer maxPayload", () => {
   });
 
   // npm `ws` flips the socket to CLOSING before emitting 'error' (receiverOnError), so
-  // close()/send() inside the handler are no-ops and the 1009 close frame still goes out.
-  it.concurrent("is CLOSING inside the error handler and keeps 1009 when the handler calls close()", async () => {
-    const wss = new WebSocketServer({ port: 0, maxPayload: SMALL });
-    const serverOutcome = Promise.withResolvers<{ readyStateInHandler: number; closeCode: number }>();
-    const clientClose = Promise.withResolvers<number>();
+  // close()/send() inside the handler are no-ops and the close code stays 1009. The
+  // server-side surface is the same whether the frame is caught by the shim's own check
+  // (just over maxPayload) or by Bun.serve's native 16 MiB cap (BIG); in the native case
+  // the transport is dropped before a close frame can be sent, so only the server side
+  // is asserted there.
+  for (const [label, size, expectedClientCode] of [
+    ["the shim's check", SMALL + 1, 1009],
+    ["the native cap", BIG, undefined],
+  ] as const) {
+    it.concurrent(`is CLOSING inside the error handler and keeps 1009 when ${label} rejects the frame`, async () => {
+      const wss = new WebSocketServer({ port: 0, maxPayload: SMALL });
+      const serverOutcome = Promise.withResolvers<{ readyStateInHandler: number; closeCode: number }>();
+      const clientClose = Promise.withResolvers<number>();
 
-    wss.on("connection", serverWs => {
-      let readyStateInHandler = -1;
-      serverWs.on("error", () => {
-        readyStateInHandler = serverWs.readyState;
-        serverWs.close(1000, "ignored");
+      wss.on("connection", serverWs => {
+        let readyStateInHandler = -1;
+        serverWs.on("error", () => {
+          readyStateInHandler = serverWs.readyState;
+          serverWs.close(1000, "ignored");
+        });
+        serverWs.on("close", closeCode => serverOutcome.resolve({ readyStateInHandler, closeCode }));
       });
-      serverWs.on("close", closeCode => serverOutcome.resolve({ readyStateInHandler, closeCode }));
+
+      const ws = new WebSocket("ws://127.0.0.1:" + (wss.address() as AddressInfo).port);
+      ws.on("open", () => ws.send(new Uint8Array(size)));
+      ws.on("close", code => clientClose.resolve(code));
+      ws.on("error", () => {});
+
+      try {
+        expect(await serverOutcome.promise).toEqual({ readyStateInHandler: WebSocket.CLOSING, closeCode: 1009 });
+        if (expectedClientCode !== undefined) expect(await clientClose.promise).toBe(expectedClientCode);
+      } finally {
+        ws.close();
+        wss.close();
+      }
     });
-
-    const ws = new WebSocket("ws://127.0.0.1:" + (wss.address() as AddressInfo).port);
-    ws.on("open", () => ws.send(new Uint8Array(SMALL + 1)));
-    ws.on("close", code => clientClose.resolve(code));
-    ws.on("error", () => {});
-
-    try {
-      expect(await serverOutcome.promise).toEqual({ readyStateInHandler: WebSocket.CLOSING, closeCode: 1009 });
-      expect(await clientClose.promise).toBe(1009);
-    } finally {
-      ws.close();
-      wss.close();
-    }
-  });
+  }
 
   it.concurrent("accepts a message larger than Bun.serve's 16 MiB default when maxPayload is raised", async () => {
     const wss = new WebSocketServer({ port: 0, maxPayload: BIG + 1024 });
