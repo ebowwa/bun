@@ -6,7 +6,7 @@
 // so repeated dlopens and repeated runs of the same binary share one file.
 
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, tempDir } from "harness";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -133,10 +133,7 @@ test.skipIf(!isLinux || !cc)(
 // started at 0, so every Worker re-extracted on its first dlopen. This test
 // verifies Workers share the one extracted file: they hash the same embedded
 // bytes to the same content-hashed filename, so all dlopens land on one path.
-//
-// Release Linux builds hit a pre-existing shutdown race in the dlopen + Worker
-// teardown path that's unrelated to this PR — skip there until that's fixed.
-test.skipIf(!isLinux || !cc || !isDebug)(
+test.skipIf(!isLinux || !cc)(
   "compiled binary's Workers share one extracted .so (#29585)",
   async () => {
     using dir = tempDir("29585-workers", {
