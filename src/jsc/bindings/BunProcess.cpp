@@ -2904,6 +2904,7 @@ enum class BunProcessStdinFdType : int32_t {
 extern "C" BunProcessStdinFdType Bun__Process__getStdinFdType(void*, int fd);
 
 extern "C" void Bun__ForceFileSinkToBeSynchronousForProcessObjectStdio(JSC::JSGlobalObject*, JSC::EncodedJSValue);
+extern "C" void Bun__trackProcessStdioSinkForTestIsolation(JSC::JSGlobalObject*, JSC::EncodedJSValue);
 static JSValue constructStdioWriteStream(JSC::JSGlobalObject* globalObject, JSC::JSObject* processObject, int fd)
 {
     auto& vm = JSC::getVM(globalObject);
@@ -2946,8 +2947,13 @@ static JSValue constructStdioWriteStream(JSC::JSGlobalObject* globalObject, JSC:
     // Until then, we have to force it to be sync EVEN for sockets or else console.log() may flush at a different time than process.stdout.write.
     forceSync = true;
 #endif
+    JSC::EncodedJSValue sink = JSValue::encode(resultObject->getIndex(globalObject, 1));
+    // Under `bun test --isolate`, each test file's global re-creates these
+    // sinks over a fresh dup of the stdio fd; track them so the isolation swap
+    // can end the outgoing file's sinks. No-op otherwise.
+    Bun__trackProcessStdioSinkForTestIsolation(globalObject, sink);
     if (forceSync) {
-        Bun__ForceFileSinkToBeSynchronousForProcessObjectStdio(globalObject, JSValue::encode(resultObject->getIndex(globalObject, 1)));
+        Bun__ForceFileSinkToBeSynchronousForProcessObjectStdio(globalObject, sink);
     }
 
     return resultObject->getIndex(globalObject, 0);
