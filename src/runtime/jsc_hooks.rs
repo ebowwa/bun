@@ -4984,7 +4984,12 @@ pub(crate) fn resolve_embedded_file_to_buf(
     let mut canonical_name_buf = [0u8; 64];
     let canonical_name = bun_core::fmt::buf_print_z(
         &mut canonical_name_buf,
-        format_args!(".bun-{}-{:x}.{}", uid, content_hash, bun_core::fmt::s(extname)),
+        format_args!(
+            ".bun-{}-{:x}.{}",
+            uid,
+            content_hash,
+            bun_core::fmt::s(extname)
+        ),
     )
     .ok()?;
 
