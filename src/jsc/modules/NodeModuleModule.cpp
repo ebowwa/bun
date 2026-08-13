@@ -970,7 +970,7 @@ _pathCache              getPathCacheObject                PropertyCallback
 _preloadModules         jsFunctionPreloadModules          Function 0
 _resolveFilename        nodeModuleResolveFilename         CustomAccessor
 _resolveLookupPaths     jsFunctionResolveLookupPaths      Function 2
-_stat                   &Generated::NodeModuleModule::js_stat Function 1
+_stat                   &Generated::NodeModuleModule::js_stat DontEnum|Function 1
 builtinModules          getBuiltinModulesObject           PropertyCallback
 constants               getConstantsObject                PropertyCallback
 createRequire           jsFunctionNodeModuleCreateRequire Function 1
@@ -985,8 +985,8 @@ register                jsFunctionRegister                Function 1
 runMain                 moduleRunMain                        CustomAccessor
 SourceMap               getSourceMapFunction              PropertyCallback
 syncBuiltinESMExports   jsFunctionSyncBuiltinESMExports   Function 0
-wrap                    jsFunctionWrap                    Function 1
-wrapper                 nodeModuleWrapper                 CustomAccessor
+wrap                    jsFunctionWrap                    DontEnum|Function 1
+wrapper                 nodeModuleWrapper                 DontEnum|CustomAccessor
 Module                  getModuleObject                   PropertyCallback
 @end
 */
@@ -1228,11 +1228,15 @@ JSC::JSObject* generateNativeModule_NodeModule(JSC::JSGlobalObject* lexicalGloba
     auto& vm = JSC::getVM(globalObject);
     auto* constructor = globalObject->m_nodeModuleConstructor.getInitializedOnMainThread(globalObject);
 
-    // The exports are the static table's entries, not the constructor's own properties (`length`, `name`,
-    // whatever user code assigned onto Module).
+    // The exports are the static table's enumerable entries, i.e. Object.keys(Module): not the constructor's
+    // other own properties (`length`, `name`, whatever user code assigned onto Module), and not the DontEnum
+    // entries (`prototype`, `wrap`, `wrapper`, `_stat`), which Node's namespace does not export either.
     PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings, PrivateSymbolMode::Exclude);
-    for (const auto& entry : Bun::nodeModuleObjectTableValues)
+    for (const auto& entry : Bun::nodeModuleObjectTableValues) {
+        if (entry.attributes() & PropertyAttribute::DontEnum)
+            continue;
         properties.add(Identifier::fromString(vm, entry.m_key));
+    }
 
     return exportObjectProperties(vm, constructor, properties, exportNames, exportValues);
 }

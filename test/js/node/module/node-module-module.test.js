@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import fs from "fs";
 import { bunEnv, bunExe, isWindows, ospath, tempDir } from "harness";
-import Module, { _nodeModulePaths, builtinModules, createRequire, isBuiltin, wrap } from "module";
+import * as moduleNamespace from "module";
+import Module, { _nodeModulePaths, builtinModules, createRequire, isBuiltin } from "module";
 import path from "path";
 
 describe.concurrent("node-module-module", () => {
@@ -362,36 +363,32 @@ console.log("survived", require("./late.js"));`,
     expect(m.exports).toEqual({});
   });
 
-  test("Module.prototype is not enumerable (#16933)", async () => {
+  test("prototype, wrap, wrapper and _stat are non-enumerable, like in Node (#16933)", () => {
     expect(Object.getOwnPropertyDescriptor(Module, "prototype")).toEqual({
       value: Module.prototype,
       writable: true,
       enumerable: false,
       configurable: false,
     });
-    expect(Object.keys(Module)).not.toContain("prototype");
+    const hidden = ["_stat", "prototype", "wrap", "wrapper"];
+    expect(hidden.filter(name => Object.getOwnPropertyDescriptor(Module, name).enumerable)).toEqual([]);
+    expect(Object.keys(Module).filter(name => hidden.includes(name))).toEqual([]);
+    // The ES module's export list is Object.keys(Module); Node does not export these either.
+    expect(hidden.filter(name => name in moduleNamespace)).toEqual([]);
+    expect(typeof moduleNamespace.createRequire).toBe("function");
+  });
 
-    // jest-runtime copies every enumerable own property of Module onto a class
-    // declaration, whose own .prototype is non-writable. If Module.prototype is
-    // enumerable this throws "Attempted to assign to readonly property." in
-    // strict mode. Run in a subprocess because the loop also invokes the
-    // inherited Module.wrapper setter, which flips a process-global flag.
+  test("copying Module's enumerable statics onto a subclass, like jest-runtime does (#16933)", async () => {
+    // A fixture rather than -e: the loop only throws in strict mode, and -e scripts are sloppy.
     await using proc = Bun.spawn({
-      cmd: [
-        bunExe(),
-        "-e",
-        `"use strict";
-         const Module = require("node:module");
-         class Sub extends Module {}
-         for (const [key, value] of Object.entries(Module)) Sub[key] = value;
-         console.log("ok");`,
-      ],
+      cmd: [bunExe(), "run", path.join(import.meta.dir, "jestModuleStatics.cjs")],
       env: bunEnv,
       stderr: "pipe",
+      stdout: "pipe",
     });
     const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
     expect(stderr).toBe("");
-    expect(stdout).toBe("ok\n");
+    expect(stdout.trim()).toBe("--pass--");
     expect(exitCode).toBe(0);
   });
 
@@ -493,9 +490,9 @@ console.log("survived", require("./late.js"));`,
 
   test("Module.wrap", () => {
     var mod = { exports: {} };
-    expect(eval(wrap("exports.foo = 1; return 42"))(mod.exports, mod)).toBe(42);
+    expect(eval(Module.wrap("exports.foo = 1; return 42"))(mod.exports, mod)).toBe(42);
     expect(mod.exports.foo).toBe(1);
-    expect(wrap()).toBe("(function (exports, require, module, __filename, __dirname) { undefined\n});");
+    expect(Module.wrap()).toBe("(function (exports, require, module, __filename, __dirname) { undefined\n});");
   });
 
   test("Overwriting _resolveFilename", async () => {

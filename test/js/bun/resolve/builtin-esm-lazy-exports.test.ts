@@ -486,8 +486,10 @@ test.concurrent("node:module: linking constructs the linked bindings, not the re
     import { constructedOnModule, print } from "./native-helper.mjs";
     const afterLink = constructedOnModule();
     const exportNames = Reflect.ownKeys(ns).filter(key => typeof key === "string");
-    // The export list is the static table, which is also exactly what Object.keys of the constructor lists.
+    // The export list is the static table's enumerable entries, which is also exactly what Object.keys of the
+    // constructor lists. The non-enumerable entries are not exports, as in Node.
     const exportListMatches = exportNames.sort().join() === [...Object.keys(Module), "default"].sort().join();
+    const nonEnumerableExports = ["_stat", "prototype", "wrap", "wrapper"].filter(name => name in ns);
     const afterListing = constructedOnModule();
     const builtinModules = ns.builtinModules;
     print({
@@ -495,6 +497,7 @@ test.concurrent("node:module: linking constructs the linked bindings, not the re
       afterLink,
       createRequire: typeof createRequire(import.meta.url)("node:path").join === "function",
       exportListMatches,
+      nonEnumerableExports,
       afterListing,
       builtinModules: Array.isArray(builtinModules) && builtinModules === Module.builtinModules,
       afterRead: constructedOnModule(),
@@ -507,6 +510,7 @@ test.concurrent("node:module: linking constructs the linked bindings, not the re
     afterLink: ["createRequire"],
     createRequire: true,
     exportListMatches: true,
+    nonEnumerableExports: [],
     afterListing: ["createRequire"],
     builtinModules: true,
     afterRead: ["builtinModules", "createRequire"],
