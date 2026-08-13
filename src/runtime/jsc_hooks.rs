@@ -4982,12 +4982,11 @@ pub(crate) fn resolve_embedded_file_to_buf(
     let content_hash = bun_wyhash::hash(file_contents);
     let uid = extract_owner_uid();
     let mut canonical_name_buf = [0u8; 64];
-    let canonical_name_len =
-        format_canonical_name(&mut canonical_name_buf, uid, content_hash, extname)?;
-    let canonical_name = bun_core::ZStr::from_buf(
-        &canonical_name_buf[..canonical_name_len],
-        canonical_name_len - 1,
-    );
+    let canonical_name = bun_core::fmt::buf_print_z(
+        &mut canonical_name_buf,
+        format_args!(".bun-{}-{:x}.{}", uid, content_hash, bun_core::fmt::s(extname)),
+    )
+    .ok()?;
 
     // Reuse the canonical file from a previous run if it is still ours with
     // the right size. `lstatat` so a planted symlink fails the ISREG check
@@ -5057,41 +5056,6 @@ fn write_absolute(out_buf: &mut [u8], tmpdir: &[u8], name: &[u8]) -> Option<usiz
         &[name],
     );
     Some(result.len())
-}
-
-/// `.bun-{uid}-{hash:x}.{ext}\0` into `buf`. Returns the written length
-/// including the trailing NUL.
-fn format_canonical_name(
-    buf: &mut [u8],
-    uid: u32,
-    content_hash: u64,
-    extname: &[u8],
-) -> Option<usize> {
-    use core::fmt::Write as _;
-    struct Cursor<'a> {
-        buf: &'a mut [u8],
-        len: usize,
-    }
-    impl Cursor<'_> {
-        fn push(&mut self, bytes: &[u8]) -> Option<()> {
-            if self.len + bytes.len() > self.buf.len() {
-                return None;
-            }
-            self.buf[self.len..self.len + bytes.len()].copy_from_slice(bytes);
-            self.len += bytes.len();
-            Some(())
-        }
-    }
-    impl core::fmt::Write for Cursor<'_> {
-        fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            self.push(s.as_bytes()).ok_or(core::fmt::Error)
-        }
-    }
-    let mut cursor = Cursor { buf, len: 0 };
-    write!(&mut cursor, ".bun-{}-{:x}.", uid, content_hash).ok()?;
-    cursor.push(extname)?;
-    cursor.push(&[0u8])?;
-    Some(cursor.len)
 }
 
 /// euid, not uid: `open(2)` sets the new file's owner to euid, so a
