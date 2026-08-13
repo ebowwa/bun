@@ -1267,7 +1267,7 @@ Server.prototype.setTimeout = function (msecs, callback) {
 const kBunServeDefaultMaxPayloadLength = 16 * 1024 * 1024;
 Server.prototype[kEnsureWebSocketMaxPayload] = function (maxPayload) {
   if (typeof maxPayload !== "number" || NumberIsNaN(maxPayload)) return;
-  // npm `ws`: maxPayload < 1 is unlimited; Bun.serve stores a u32.
+  // ws.js passes 0 for unlimited; Bun.serve stores a u32.
   if (maxPayload < 1 || maxPayload > 0xffffffff) maxPayload = 0xffffffff;
   maxPayload = MathFloor(maxPayload);
   let ctx = this[kWebSocketReload];
@@ -1284,8 +1284,6 @@ Server.prototype[kEnsureWebSocketMaxPayload] = function (maxPayload) {
   if (bunServer && websocket) {
     websocket.maxPayloadLength = maxPayload;
     bunServer.reload({ websocket, onNodeHTTPRequest });
-    // reload()'s clearRoutes() empties uWS filterHandlers; re-register them.
-    applyServerCustomOptions(this);
   }
 };
 

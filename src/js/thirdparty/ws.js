@@ -26,6 +26,18 @@ function sendAfterClose(state, cb) {
   }
 }
 
+// npm ws's Receiver does `maxPayload | 0` and skips the check below 1, so an
+// explicit undefined/null/0 is unlimited (0 here), not the 100 MiB default.
+function normalizeMaxPayload(maxPayload) {
+  return typeof maxPayload === "number" && maxPayload >= 1 ? Math.floor(maxPayload) : 0;
+}
+
+function createMaxPayloadError() {
+  const error = new RangeError("Max payload size exceeded");
+  error.code = "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";
+  return error;
+}
+
 /**
  * Extracts TLS and proxy options from an agent object.
  * @param {Object} agent The agent object to extract options from
@@ -979,7 +991,7 @@ class BunWebSocketMocked extends EventEmitter {
     this.#state = ReadyState_CONNECTING;
     this.#url = url;
     this.#bufferedAmount = 0;
-    this.#maxPayload = typeof maxPayload === "number" && maxPayload > 0 ? maxPayload : 0;
+    this.#maxPayload = maxPayload;
     binaryType = binaryType || "arraybuffer";
     if (binaryType !== "nodebuffer" && binaryType !== "blob" && binaryType !== "arraybuffer") {
       throw new TypeError("binaryType must be either 'blob', 'arraybuffer' or 'nodebuffer'");
@@ -1022,12 +1034,9 @@ class BunWebSocketMocked extends EventEmitter {
     if (maxPayload > 0) {
       const byteLength = typeof message === "string" ? Buffer.byteLength(message) : message.byteLength;
       if (byteLength > maxPayload) {
-        const error = new RangeError("Max payload size exceeded");
-        error.code = "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";
-        error[Symbol.for("ws-status-code")] = 1009;
         this.#state = ReadyState_CLOSING;
         try {
-          this.emit("error", error);
+          this.emit("error", createMaxPayloadError());
         } finally {
           this.#ws?.close(1009, "");
         }
@@ -1074,11 +1083,8 @@ class BunWebSocketMocked extends EventEmitter {
 
     // Bun.serve's native maxPayloadLength force-close: surface as ws's RangeError + 1009.
     if (code === 1006 && typeof reason === "string" && reason.startsWith("Received too big message")) {
-      const error = new RangeError("Max payload size exceeded");
-      error.code = "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";
-      error[Symbol.for("ws-status-code")] = 1009;
       try {
-        this.emit("error", error);
+        this.emit("error", createMaxPayloadError());
       } finally {
         this.emit("close", 1009, "");
       }
@@ -1390,10 +1396,10 @@ class WebSocketServer extends EventEmitter {
         res.end(body);
       });
 
-      this._server[kEnsureWebSocketMaxPayload]?.(options.maxPayload);
+      this._server[kEnsureWebSocketMaxPayload]?.(normalizeMaxPayload(options.maxPayload));
       this._server.listen(port, host, backlog, callback);
     } else if (server) {
-      server[kEnsureWebSocketMaxPayload]?.(options.maxPayload);
+      server[kEnsureWebSocketMaxPayload]?.(normalizeMaxPayload(options.maxPayload));
       this._server = server;
     }
 
@@ -1552,9 +1558,10 @@ class WebSocketServer extends EventEmitter {
 
     if (this._state > RUNNING) return abortHandshake(response, 503);
 
+    const maxPayload = normalizeMaxPayload(this.options.maxPayload);
     // noServer: takes effect from the next upgrade (this request already
     // captured the pre-reload WebSocketContext).
-    if (!this._server) httpServer[kEnsureWebSocketMaxPayload]?.(this.options.maxPayload);
+    if (!this._server) httpServer[kEnsureWebSocketMaxPayload]?.(maxPayload);
 
     let protocol = "";
     if (protocols.size) {
@@ -1565,7 +1572,7 @@ class WebSocketServer extends EventEmitter {
         ? this.options.handleProtocols(protocols, request)
         : protocols.values().next().value;
     }
-    const ws = new BunWebSocketMocked(request.url, protocol, extensions, "nodebuffer", this.options.maxPayload);
+    const ws = new BunWebSocketMocked(request.url, protocol, extensions, "nodebuffer", maxPayload);
 
     const headers = ["HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade"];
     this.emit("headers", headers, request);
