@@ -468,54 +468,18 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionDlopen, (JSC::JSGlobalObject * globalOb
 #else
 #define StandaloneModuleGraph__base_path "/$bunfs/"_s
 #endif
-#if OS(WINDOWS)
-    bool deleteAfter = false;
-#endif
     [[maybe_unused]] bool fromEmbedded = false;
     if (filename.startsWith(StandaloneModuleGraph__base_path)) {
         BunString bunStr = Bun::toString(filename);
         if (Bun__resolveEmbeddedNodeFile(globalObject->bunVM(), &bunStr)) {
             filename = bunStr.transferToWTFString();
             // The extracted file is content-hashed and shared across dlopens
-            // and restarts (#29587), so POSIX must not unlink it. Windows
-            // still marks it for delete-on-reboot (NTFS cannot unlink an
-            // in-use file).
-#if OS(WINDOWS)
-            deleteAfter = true;
-#endif
+            // and restarts (#29587), so it is never deleted here.
             fromEmbedded = true;
         }
     }
 
     RETURN_IF_EXCEPTION(scope, {});
-
-#if OS(WINDOWS)
-    const auto tryToDeleteIfNecessary = [&]() {
-        if (deleteAfter) {
-            // Only call it once
-            deleteAfter = false;
-            if (filename.is8Bit()) {
-                filename.convertTo16Bit();
-            }
-
-            // Convert to 16-bit with a sentinel zero value.
-            auto span = filename.span16();
-            auto dupeZ = new wchar_t[span.size() + 1];
-            if (dupeZ) {
-                memcpy(dupeZ, span.data(), span.size_bytes());
-                dupeZ[span.size()] = L'\0';
-
-                // We can't immediately delete the file on Windows.
-                // Instead, we mark it for deletion on reboot.
-                MoveFileExW(
-                    dupeZ,
-                    NULL, // NULL destination means delete
-                    MOVEFILE_DELAY_UNTIL_REBOOT);
-                delete[] dupeZ;
-            }
-        }
-    };
-#endif
 
     // Handle known yet-to-be-working in Bun
     {
@@ -599,18 +563,11 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionDlopen, (JSC::JSGlobalObject * globalOb
         WTF::String msg = errorBuilder.toString();
         if (messageBuffer)
             LocalFree(messageBuffer); // Free the buffer allocated by FormatMessageW
-
-        // Since we're relying on LastError(), we have to delete after checking for errors
-        tryToDeleteIfNecessary();
 #else
         WTF::String msg = WTF::String::fromUTF8(dlerror());
 #endif
         return throwError(globalObject, scope, ErrorCode::ERR_DLOPEN_FAILED, msg);
     }
-
-#if OS(WINDOWS)
-    tryToDeleteIfNecessary();
-#endif
 
     if (callCountAtStart != globalObject->napiModuleRegisterCallCount) {
         // Module self-registered via static constructor(s).
