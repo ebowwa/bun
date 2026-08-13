@@ -5018,7 +5018,7 @@ pub(crate) fn resolve_embedded_file_to_buf(
     let scratch_name = Fs::FileSystem::tmpname(extname, &mut scratch_buf[..], content_hash).ok()?;
 
     let mut tmpfile = bun_sys::Tmpfile::create(tmpdir_fd, scratch_name).ok()?;
-    let tmpfile_fd = tmpfile.fd;
+    let _close = bun_sys::CloseOnDrop::new(tmpfile.fd);
 
     let mut write_scratch = bun_paths::path_buffer_pool::get();
     let write_ok = bun_sys::write_file_with_path_buffer(
@@ -5029,13 +5029,12 @@ pub(crate) fn resolve_embedded_file_to_buf(
             },
             encoding: bun_sys::WriteFileEncoding::Buffer,
             dirfd: tmpdir_fd,
-            file: bun_sys::PathOrFileDescriptor::Fd(tmpfile_fd),
+            file: bun_sys::PathOrFileDescriptor::Fd(tmpfile.fd),
             ..Default::default()
         },
     )
     .is_ok();
     if !write_ok {
-        let _ = bun_sys::close(tmpfile_fd);
         let _ = bun_sys::unlinkat(tmpdir_fd, scratch_name);
         return None;
     }
@@ -5043,7 +5042,6 @@ pub(crate) fn resolve_embedded_file_to_buf(
     // On sticky `/tmp` the rename fails EACCES/EPERM when another user owns
     // the destination; fall back to the scratch file.
     let rename_ok = tmpfile.finish(canonical_name).is_ok();
-    let _ = bun_sys::close(tmpfile_fd);
 
     let final_name = if rename_ok {
         canonical_name

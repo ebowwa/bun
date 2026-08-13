@@ -505,8 +505,6 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionDlopen, (JSC::JSGlobalObject * globalOb
 #if OS(WINDOWS)
     BunString filename_str = Bun::toString(filename);
     HMODULE handle = Bun__LoadLibraryBunString(&filename_str);
-
-// On Windows, we use GetLastError() for error messages, so we can only delete after checking for errors
 #else
 #if OS(LINUX)
     // A glibc-linked addon loaded into a musl process segfaults inside the
