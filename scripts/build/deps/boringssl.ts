@@ -36,10 +36,15 @@ export const boringssl: Dependency = {
     commit: BORINGSSL_COMMIT,
   }),
 
-  // Upstream mem.cc gates OPENSSL_memory_* weak-symbol overrides on __ELF__;
-  // on Mach-O/COFF the hooks compile to static nullptr and OPENSSL_malloc goes
-  // straight to libc. Declare them as plain externs so lib.rs binds everywhere.
-  patches: ["patches/boringssl/require-memory-hooks.patch", "patches/boringssl/expose_aes-cfb8.patch"],
+  patches: [
+    // Upstream mem.cc gates OPENSSL_memory_* weak-symbol overrides on __ELF__;
+    // on Mach-O/COFF the hooks compile to static nullptr and OPENSSL_malloc goes
+    // straight to libc. Declare them as plain externs so lib.rs binds everywhere.
+    "patches/boringssl/require-memory-hooks.patch",
+    // Upstream has CRYPTO_cfb128_8_encrypt but no EVP wrappers for CFB8, so
+    // createCipheriv("aes-*-cfb8") fails. See oven-sh/bun#28521.
+    "patches/boringssl/expose_aes-cfb8.patch",
+  ],
 
   build: cfg => {
     // win-x64 uses NASM-syntax .asm; everything else (including win-aarch64)
