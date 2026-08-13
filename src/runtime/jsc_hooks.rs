@@ -5020,20 +5020,9 @@ pub(crate) fn resolve_embedded_file_to_buf(
     let mut tmpfile = bun_sys::Tmpfile::create(tmpdir_fd, scratch_name).ok()?;
     let _close = bun_sys::CloseOnDrop::new(tmpfile.fd);
 
-    let mut write_scratch = bun_paths::path_buffer_pool::get();
-    let write_ok = bun_sys::write_file_with_path_buffer(
-        &mut write_scratch,
-        &bun_sys::WriteFileArgs {
-            data: bun_sys::WriteFileData::Buffer {
-                buffer: file_contents,
-            },
-            encoding: bun_sys::WriteFileEncoding::Buffer,
-            dirfd: tmpdir_fd,
-            file: bun_sys::PathOrFileDescriptor::Fd(tmpfile.fd),
-            ..Default::default()
-        },
-    )
-    .is_ok();
+    let write_ok = bun_sys::File::borrow(&tmpfile.fd)
+        .write_all(file_contents)
+        .is_ok();
     if !write_ok {
         let _ = bun_sys::unlinkat(tmpdir_fd, scratch_name);
         return None;
