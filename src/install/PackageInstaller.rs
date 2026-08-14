@@ -1090,14 +1090,14 @@ impl<'a> PackageInstaller<'a> {
         self.trees[tree_id as usize].inside_replaced_folder = inside;
     }
 
-    /// Mirrors the install dispatch and `PackageInstall::install`: these are
-    /// installed as a symlink, which leaves whatever is nested in the target alone.
-    fn install_replaces_folder(&self, tag: resolution::Tag) -> bool {
-        match tag {
-            resolution::Tag::Symlink | resolution::Tag::Workspace | resolution::Tag::Root => false,
-            resolution::Tag::Folder => self.lockfile().is_workspace_tree_id(self.current_tree_id),
-            _ => true,
-        }
+    /// Only `install_from_link` leaves the folder in place (one symlink is re-pointed).
+    /// `PackageInstall::install` replaces it, also for folder dependencies, which
+    /// become a directory of per-file symlinks.
+    fn install_replaces_folder(tag: resolution::Tag) -> bool {
+        !matches!(
+            tag,
+            resolution::Tag::Symlink | resolution::Tag::Workspace | resolution::Tag::Root
+        )
     }
 
     // `pub fn deinit` dropped. All owned fields (`pending_lifecycle_scripts: Vec`,
@@ -1650,7 +1650,7 @@ impl<'a> PackageInstaller<'a> {
         if verifying
             && needs_install
             && !inside_replaced_folder
-            && self.install_replaces_folder(resolution.tag)
+            && Self::install_replaces_folder(resolution.tag)
         {
             self.trees[self.current_tree_id as usize]
                 .replaced
@@ -1884,8 +1884,8 @@ impl<'a> PackageInstaller<'a> {
                         || (resolution.tag == resolution::Tag::Folder
                             && !self.lockfile().is_workspace_tree_id(self.current_tree_id))
                     {
-                        // This is a transitive folder dependency. It is installed with a single symlink to the target folder/file,
-                        // and is not hoisted.
+                        // This is a transitive folder dependency. It is installed as a directory of symlinks
+                        // to the target's files (see `PackageInstall::install`), and is not hoisted.
                         //
                         // A transitive `Resolution::Folder` declared by a local `file:` package
                         // is relative to the top-level dir (`Package::parse` normalized it), so
