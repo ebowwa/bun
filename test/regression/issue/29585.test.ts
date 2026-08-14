@@ -68,7 +68,7 @@ async function buildFixture(cwd: string): Promise<{ out: string; libBytes: Buffe
   return { out, libBytes };
 }
 
-test.skipIf(!isLinux || !cc)(
+test.concurrent.skipIf(!isLinux || !cc)(
   "compiled binary deduplicates extracted embedded .so across dlopen calls + process restarts (#29585)",
   async () => {
     using dir = tempDir("29585", {
@@ -133,7 +133,7 @@ test.skipIf(!isLinux || !cc)(
 // started at 0, so every Worker re-extracted on its first dlopen. This test
 // verifies Workers share the one extracted file: they hash the same embedded
 // bytes to the same content-hashed filename, so all dlopens land on one path.
-test.skipIf(!isLinux || !cc)(
+test.concurrent.skipIf(!isLinux || !cc)(
   "compiled binary's Workers share one extracted .so (#29585)",
   async () => {
     using dir = tempDir("29585-workers", {
