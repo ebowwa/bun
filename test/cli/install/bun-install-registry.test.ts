@@ -3544,7 +3544,7 @@ describe("hoisting", async () => {
     expect(lockfile).toMatchNodeModulesAt(packageDir);
   });
 
-  test("nested dependency deferred behind an unrelated root reinstall is skipped, not reinstalled", async () => {
+  test("nested dependency is left alone when only an unrelated root sibling is reinstalled", async () => {
     await writeFile(
       packageJson,
       JSON.stringify({
@@ -3560,9 +3560,9 @@ describe("hoisting", async () => {
     const nested = join(packageDir, "node_modules", "one-fixed-dep", "node_modules", "no-deps", "package.json");
     const { ino } = await lstat(nested);
 
-    // Only the root `no-deps@2.0.0` needs a reinstall. The nested
-    // `no-deps@1.0.0` is deferred until the root tree finishes, then must be
-    // re-verified and skipped rather than downloaded again.
+    // Only the root `no-deps@2.0.0` needs a reinstall. `one-fixed-dep/` is not
+    // being replaced, so the nested `no-deps@1.0.0` inside it must still be
+    // skipped as installed rather than downloaded again.
     await rm(join(packageDir, ".bun-cache"), { recursive: true, force: true });
     await rm(join(packageDir, "node_modules", "no-deps", "package.json"));
 
@@ -3574,6 +3574,54 @@ describe("hoisting", async () => {
       version: "2.0.0",
     });
     expect((await lstat(nested)).ino).toBe(ino);
+
+    const lockfile = parseLockfile(packageDir);
+    expect(lockfile).toMatchNodeModulesAt(packageDir);
+  });
+
+  test("dependencies nested two levels below a reinstalled package are reinstalled", async () => {
+    // See registry/packages/create-two-level-nest-package.ts for the layout.
+    await writeFile(
+      packageJson,
+      JSON.stringify({
+        name: "foo",
+        dependencies: {
+          "two-level-nest": "1.0.0",
+          "one-fixed-dep": "2.0.0",
+          "no-deps": "2.0.0",
+        },
+      }),
+    );
+    await runBunInstall(env, packageDir);
+
+    const nestedDir = join(packageDir, "node_modules", "two-level-nest", "node_modules");
+    const expected = async () => ({
+      "one-fixed-dep": (await file(join(nestedDir, "one-fixed-dep", "package.json")).json()).version,
+      "no-deps": (await file(join(nestedDir, "no-deps", "package.json")).json()).version,
+      "one-fixed-dep/no-deps": (
+        await file(join(nestedDir, "one-fixed-dep", "node_modules", "no-deps", "package.json")).json()
+      ).version,
+    });
+    expect(await expected()).toEqual({
+      "one-fixed-dep": "1.0.0",
+      "no-deps": "1.1.0",
+      "one-fixed-dep/no-deps": "1.0.0",
+    });
+
+    // Reinstalling `two-level-nest` replaces its whole folder. The package
+    // under `two-level-nest/node_modules/one-fixed-dep/node_modules` is only
+    // marked through its parent tree, not by a direct entry in the root's.
+    await rm(join(packageDir, ".bun-cache"), { recursive: true, force: true });
+    await rm(join(packageDir, "node_modules", "two-level-nest", "package.json"));
+
+    const { out } = await runBunInstall(env, packageDir, { savesLockfile: false });
+    expect(out).toContain("4 packages installed");
+
+    expect(await expected()).toEqual({
+      "one-fixed-dep": "1.0.0",
+      "no-deps": "1.1.0",
+      "one-fixed-dep/no-deps": "1.0.0",
+    });
 
     const lockfile = parseLockfile(packageDir);
     expect(lockfile).toMatchNodeModulesAt(packageDir);
