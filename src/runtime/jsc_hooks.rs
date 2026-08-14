@@ -4970,11 +4970,7 @@ pub(crate) fn resolve_embedded_file_to_buf(
         return None;
     }
 
-    let graph = bun_standalone_graph::Graph::get()?;
-    // SAFETY: `graph` is the `UnsafeCell::get()` pointer to the process-
-    // lifetime singleton; the shared `&` reads only immutable-after-init
-    // fields, so it cannot alias a `&mut` from other `Graph::get()` callers.
-    let file = (unsafe { &*graph }).find_ref(input_path)?;
+    let file = bun_standalone_graph::Graph::get_ref()?.find_ref(input_path)?;
     let file_contents: &[u8] = file.contents.as_bytes();
 
     // `.bun-{uid}-{wyhash(contents)}.{ext}`: the hash dedupes; the uid keeps
