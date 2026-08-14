@@ -5866,9 +5866,21 @@ extern "C" size_t JSC__VM__externalMemorySize(JSC::VM* vm)
 extern "C" void JSC__JSGlobalObject__queueMicrotaskJob(JSC::JSGlobalObject* arg0, JSC::EncodedJSValue JSValue1, JSC::EncodedJSValue JSValue3, JSC::EncodedJSValue JSValue4)
 {
     Zig::GlobalObject* globalObject = static_cast<Zig::GlobalObject*>(arg0);
+    JSValue job = JSValue::decode(JSValue1);
+    JSValue asyncContext = globalObject->m_asyncContextData.get()->getInternalField(0);
+
+    // A callback stored via AsyncContextFrame::withAsyncContextIfNeeded runs in
+    // the context captured when it was stored, not whatever is active when the
+    // native event that queues it fires. BunPerformMicrotaskJob only calls
+    // callables, so the frame has to be unwrapped here.
+    if (auto* wrapper = dynamicDowncast<AsyncContextFrame>(job)) {
+        job = wrapper->callback.get();
+        asyncContext = wrapper->context.get();
+    }
+
     JSValue microtaskArgs[] = {
-        JSValue::decode(JSValue1),
-        globalObject->m_asyncContextData.get()->getInternalField(0),
+        job,
+        asyncContext,
         JSValue::decode(JSValue3),
         JSValue::decode(JSValue4)
     };
@@ -5888,9 +5900,7 @@ extern "C" void JSC__JSGlobalObject__queueMicrotaskJob(JSC::JSGlobalObject* arg0
     auto& vm = globalObject->vm();
     if (microtaskArgs[0].isCell()) {
         JSC::Integrity::auditCellFully(vm, microtaskArgs[0].asCell());
-        if (!microtaskArgs[0].inherits<AsyncContextFrame>()) {
-            ASSERT_WITH_MESSAGE(microtaskArgs[0].isCallable(), "queueMicrotask must be called with an async context frame or a callable.");
-        }
+        ASSERT_WITH_MESSAGE(microtaskArgs[0].isCallable(), "queueMicrotask must be called with a callable or an async context frame wrapping one.");
     }
     if (microtaskArgs[1].isCell()) {
         JSC::Integrity::auditCellFully(vm, microtaskArgs[1].asCell());

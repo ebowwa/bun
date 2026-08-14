@@ -1774,6 +1774,9 @@ impl JSValkeyClient {
         if !handler_callback.is_callable() {
             return Err(global.throw_invalid_argument_type("subscribe", "listener", "function"));
         }
+        // Messages are dispatched from socket reads, where no user async context
+        // is active, so the listener carries the one active in this call.
+        let handler_callback = handler_callback.with_async_context_if_needed(global);
 
         // The first argument given is the channel or may be an array of channels.
         if channel_or_many.is_array() {

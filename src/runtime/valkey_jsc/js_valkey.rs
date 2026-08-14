@@ -181,7 +181,7 @@ impl SubscriptionCtx {
         let mut array_it = existing.array_iterator(global_object)?;
         let updated_array = JSArray::create_empty(global_object, 0)?;
         while let Some(iter) = array_it.next()? {
-            if iter == callback {
+            if iter.unwrap_async_context_frame() == callback {
                 continue;
             }
             updated_array.push(global_object, iter)?;
@@ -201,7 +201,12 @@ impl SubscriptionCtx {
         Ok(Some(new_length as usize))
     }
 
-    /// Add a handler for receiving messages on a specific channel
+    /// Add a handler for receiving messages on a specific channel.
+    ///
+    /// `callback` is stored as given; `subscribe()` passes it already wrapped
+    /// in the caller's async context, which is why
+    /// [`remove_receive_handler`](Self::remove_receive_handler) unwraps the
+    /// stored entries before comparing them with the user's function.
     pub(crate) fn upsert_receive_handler(
         &self,
         global_object: &JSGlobalObject,
@@ -297,7 +302,7 @@ impl SubscriptionCtx {
         // If callbacks is an array, iterate and call each one
         let mut iter = callbacks.array_iterator(global_object)?;
         while let Some(callback) = iter.next()? {
-            debug_assert!(callback.is_callable());
+            debug_assert!(callback.is_callable() || callback.is_async_context_frame());
             // `event_loop_mut()` is the safe accessor for the VM-owned
             // event-loop self-pointer (see `VirtualMachine::event_loop_mut`).
             vm.event_loop_mut()
@@ -1123,13 +1128,56 @@ impl JSValkeyClient {
     // `onconnect`/`onclose` are declared with `this: true` in
     // valkey.classes.ts, so the codegen thunk passes the JS wrapper cell as
     // `this_value` (between `&self` and `global`). No `host_fn` attribute —
-    // the extern "C" shim lives in generated_classes.rs. Setter now returns
-    // `()` — `IntoHostSetterReturn for ()` ⇒ `true` at the ABI, identical to
-    // the old `-> bool { true }`.
-    bun_jsc::cached_prop_hostfns! {
-        crate::generated_classes::js_RedisClient;
-        (get_on_connect, set_on_connect => onconnect_get_cached, onconnect_set_cached),
-        (get_on_close,   set_on_close   => onclose_get_cached, onclose_set_cached),
+    // the extern "C" shim lives in generated_classes.rs.
+    //
+    // Both fire from socket events, long after the assignment's async context
+    // is gone, so a callable is stored with that context captured and the
+    // getter hands back the function the user assigned. Anything else is
+    // stored as-is so it still round-trips through the getter.
+    pub(crate) fn get_on_connect(&self, this_value: JSValue, _global: &JSGlobalObject) -> JSValue {
+        Self::handler_for_js(Js::onconnect_get_cached(this_value))
+    }
+
+    pub(crate) fn set_on_connect(
+        &self,
+        this_value: JSValue,
+        global: &JSGlobalObject,
+        value: JSValue,
+    ) {
+        Js::onconnect_set_cached(
+            this_value,
+            global,
+            Self::capture_handler_context(global, value),
+        );
+    }
+
+    pub(crate) fn get_on_close(&self, this_value: JSValue, _global: &JSGlobalObject) -> JSValue {
+        Self::handler_for_js(Js::onclose_get_cached(this_value))
+    }
+
+    pub(crate) fn set_on_close(
+        &self,
+        this_value: JSValue,
+        global: &JSGlobalObject,
+        value: JSValue,
+    ) {
+        Js::onclose_set_cached(
+            this_value,
+            global,
+            Self::capture_handler_context(global, value),
+        );
+    }
+
+    fn capture_handler_context(global: &JSGlobalObject, value: JSValue) -> JSValue {
+        if value.is_callable() {
+            value.with_async_context_if_needed(global)
+        } else {
+            value
+        }
+    }
+
+    fn handler_for_js(stored: Option<JSValue>) -> JSValue {
+        stored.map_or(JSValue::UNDEFINED, JSValue::unwrap_async_context_frame)
     }
 
     fn reset_connection_timeout(&self) {
