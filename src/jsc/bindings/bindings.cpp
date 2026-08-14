@@ -5869,10 +5869,7 @@ extern "C" void JSC__JSGlobalObject__queueMicrotaskJob(JSC::JSGlobalObject* arg0
     JSValue job = JSValue::decode(JSValue1);
     JSValue asyncContext = globalObject->m_asyncContextData.get()->getInternalField(0);
 
-    // A callback stored via AsyncContextFrame::withAsyncContextIfNeeded runs in
-    // the context captured when it was stored, not whatever is active when the
-    // native event that queues it fires. BunPerformMicrotaskJob only calls
-    // callables, so the frame has to be unwrapped here.
+    // BunPerformMicrotaskJob skips non-callable jobs, so a frame is unwrapped here and its context wins.
     if (auto* wrapper = dynamicDowncast<AsyncContextFrame>(job)) {
         job = wrapper->callback.get();
         asyncContext = wrapper->context.get();

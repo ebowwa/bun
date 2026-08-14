@@ -760,13 +760,11 @@ impl SocketConfig {
 //
 // `js_class_module!` / `generate-classes.ts` already emit
 // `${prop}_get_cached`/`${prop}_set_cached` (and a `Gc` enum) per cached prop.
-// Several JS classes (MySQLConnection, PostgresSQLConnection) then hand-write
-// the *other* half — the `get_*`/`set_*` host-fns that the `.classes.ts`
-// getter/setter thunks dispatch to — as pure forwarding shims. This macro
-// stamps those out so the per-class `impl` block is one line per prop instead
-// of ~10. It is only for slots that store the value verbatim; RedisClient's
-// `onconnect`/`onclose` hand-write theirs because they wrap the callback in
-// the current async context on the way in and unwrap it on the way out.
+// Several JS classes (MySQLConnection, PostgresSQLConnection)
+// then hand-write the *other* half — the `get_*`/`set_*` host-fns that the
+// `.classes.ts` getter/setter thunks dispatch to — as pure forwarding shims.
+// This macro stamps those out so the per-class `impl` block is one line per
+// prop instead of ~10.
 //
 // `($get, $set => $prop)` maps the codegen-expected host-fn idents (snake-
 // cased from the `.classes.ts` getter/setter names, e.g. `get_on_connect`)

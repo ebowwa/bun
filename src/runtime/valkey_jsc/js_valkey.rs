@@ -181,6 +181,7 @@ impl SubscriptionCtx {
         let mut array_it = existing.array_iterator(global_object)?;
         let updated_array = JSArray::create_empty(global_object, 0)?;
         while let Some(iter) = array_it.next()? {
+            // Entries were wrapped by `subscribe()`; the user holds the bare function.
             if iter.unwrap_async_context_frame() == callback {
                 continue;
             }
@@ -201,12 +202,7 @@ impl SubscriptionCtx {
         Ok(Some(new_length as usize))
     }
 
-    /// Add a handler for receiving messages on a specific channel.
-    ///
-    /// `callback` is stored as given; `subscribe()` passes it already wrapped
-    /// in the caller's async context, which is why
-    /// [`remove_receive_handler`](Self::remove_receive_handler) unwraps the
-    /// stored entries before comparing them with the user's function.
+    /// Add a handler for receiving messages on a specific channel
     pub(crate) fn upsert_receive_handler(
         &self,
         global_object: &JSGlobalObject,
@@ -1129,11 +1125,6 @@ impl JSValkeyClient {
     // valkey.classes.ts, so the codegen thunk passes the JS wrapper cell as
     // `this_value` (between `&self` and `global`). No `host_fn` attribute —
     // the extern "C" shim lives in generated_classes.rs.
-    //
-    // Both fire from socket events, long after the assignment's async context
-    // is gone, so a callable is stored with that context captured and the
-    // getter hands back the function the user assigned. Anything else is
-    // stored as-is so it still round-trips through the getter.
     pub(crate) fn get_on_connect(&self, this_value: JSValue, _global: &JSGlobalObject) -> JSValue {
         Self::handler_for_js(Js::onconnect_get_cached(this_value))
     }
@@ -1168,6 +1159,7 @@ impl JSValkeyClient {
         );
     }
 
+    /// Non-callables are stored as-is so they round-trip through the getter like before.
     fn capture_handler_context(global: &JSGlobalObject, value: JSValue) -> JSValue {
         if value.is_callable() {
             value.with_async_context_if_needed(global)

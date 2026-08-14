@@ -1618,10 +1618,7 @@ impl JSValue {
         AsyncContextFrame__withAsyncContextIfNeeded(global, self)
     }
 
-    /// True iff this is the wrapper cell
-    /// [`with_async_context_if_needed`](Self::with_async_context_if_needed)
-    /// returns while an async context is active. Not callable itself;
-    /// [`call`](Self::call) unwraps it.
+    /// True iff this is the non-callable wrapper returned by [`Self::with_async_context_if_needed`].
     #[inline]
     pub fn is_async_context_frame(self) -> bool {
         unsafe extern "C" {
@@ -1630,10 +1627,7 @@ impl JSValue {
         self.is_cell() && Bun__JSValue__isAsyncContextFrame(self)
     }
 
-    /// The value [`with_async_context_if_needed`](Self::with_async_context_if_needed)
-    /// was given: the wrapped callback when `self` is an `AsyncContextFrame`,
-    /// otherwise `self` unchanged. For handing a stored callback back to JS
-    /// (getters) and for comparing against one JS passes in (listener removal).
+    /// The callback inside an `AsyncContextFrame`; any other value is returned unchanged.
     #[inline]
     pub fn unwrap_async_context_frame(self) -> JSValue {
         unsafe extern "C" {
