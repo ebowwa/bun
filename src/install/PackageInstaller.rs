@@ -1090,9 +1090,8 @@ impl<'a> PackageInstaller<'a> {
         self.trees[tree_id as usize].inside_replaced_folder = inside;
     }
 
-    /// Only `install_from_link` leaves the folder in place (one symlink is re-pointed).
-    /// `PackageInstall::install` replaces it, also for folder dependencies, which
-    /// become a directory of per-file symlinks.
+    /// `install_from_link` re-points one symlink; `PackageInstall::install` replaces
+    /// the folder, folder dependencies included (a directory of per-file symlinks).
     fn install_replaces_folder(tag: resolution::Tag) -> bool {
         !matches!(
             tag,
