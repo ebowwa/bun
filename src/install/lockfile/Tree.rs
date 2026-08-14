@@ -791,10 +791,8 @@ impl Tree {
             // don't treat it as unsafe — match the lockfile parser and isolated
             // installer (`bun.lock.rs`, `isolated_install.rs`) which guard
             // `!name.is_empty()` here rather than failing the whole install.
-            // Neither does an unresolved dependency (it is skipped below, or as
-            // an optional peer bound to an already checked one), and
-            // `enqueue_dependency_with_main_and_success_fn` already reported
-            // its name if that is why it did not resolve.
+            // Neither does an unresolved dependency, and if its name is why it
+            // did not resolve, enqueue already reported it.
             let dependency_name = dependency
                 .name
                 .slice(lockfile.buffers.string_bytes.as_slice());

@@ -403,11 +403,9 @@ impl<'a> LazyPackageDestinationDir<'a> {
     }
 }
 
-/// A dependency alias becomes the install destination inside `node_modules`
-/// (the existing entry is renamed aside, deleted, and re-created). On top of
-/// `is_safe_install_folder_name` (empty names, `.`/`..` components, drive
-/// letters, backslashes, control characters), reject any separator other than
-/// the single `/` in a scoped name (`@scope/name`).
+/// The alias is the install destination inside `node_modules` (renamed aside,
+/// deleted and re-created), so on top of `is_safe_install_folder_name` it must
+/// be a single path component, or two for a scoped name.
 pub(crate) fn alias_is_safe_install_target(alias: &[u8]) -> bool {
     if alias.len() >= MAX_PATH_BYTES || !crate::dependency::is_safe_install_folder_name(alias) {
         return false;

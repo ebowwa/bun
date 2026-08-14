@@ -771,18 +771,14 @@ pub fn enqueue_dependency_with_main_and_success_fn(
         break 'version dependency.version.clone();
     };
 
-    // The alias becomes the `node_modules/` folder and, for registry
-    // dependencies, `name` becomes the request, the progress line and the
-    // package name; both come from untrusted manifests. Refuse to resolve (and
-    // so to fetch or print) either when it is unsafe, reporting it the way an
-    // unresolvable dependency is reported. Empty names are tolerated like in
-    // the tree builder.
+    // Refuse an unsafe alias (the future `node_modules/` folder) or registry
+    // name (the request and the package name) here, before either is fetched
+    // or printed. Empty names are tolerated, as in the tree builder.
     let invalid_name = {
         let alias = this.lockfile.str(&dependency.name);
         let alias_is_safe = if alias == this.lockfile.str(&dependency.version.literal) {
-            // `bun add <specifier>` stores the specifier as the alias until
-            // `assign_resolution` replaces it with the resolved package's
-            // name, so it never becomes a folder, but it is still printed.
+            // `bun add <specifier>` uses the specifier as the alias until
+            // `assign_resolution` names it: never a folder, but still printed.
             !dependency::contains_control_character(alias)
         } else {
             alias.is_empty() || dependency::is_safe_install_folder_name(alias)
