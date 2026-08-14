@@ -289,14 +289,11 @@ pub struct TreeContext {
     /// Number of installed dependencies. Could be successful or failure.
     pub(crate) install_count: usize,
 
-    /// Dependencies of this tree that this run (re)installs, replacing their
-    /// folders. Only filled when installed packages are being verified.
+    /// Dependencies whose folder in this tree is replaced by this install.
     pub(crate) replaced: Vec<DependencyID>,
 
-    /// This tree's `node_modules` is inside a folder that this run replaces
-    /// (see `replaced`), possibly later, once a download finishes. Whatever is
-    /// on disk here goes away with that folder, so nothing in this tree may be
-    /// skipped as already installed.
+    /// This tree is inside one of an ancestor's `replaced` folders, so what is
+    /// on disk here is going away (possibly after a download) and cannot be skipped.
     pub(crate) inside_replaced_folder: bool,
 }
 
@@ -1070,9 +1067,8 @@ impl<'a> PackageInstaller<'a> {
         true
     }
 
-    /// Must run for each tree before its dependencies are installed, in tree id
-    /// order, so the parent's `replaced` list is complete when the child is
-    /// checked.
+    /// Call before installing a tree's dependencies; relies on trees being
+    /// visited in id order, so the parent's `replaced` is already complete.
     pub(crate) fn set_inside_replaced_folder(&mut self, tree_id: lockfile::tree::Id) {
         let lockfile = self.lockfile();
         let tree = lockfile.buffers.trees.as_slice()[tree_id as usize];
@@ -1094,10 +1090,8 @@ impl<'a> PackageInstaller<'a> {
         self.trees[tree_id as usize].inside_replaced_folder = inside;
     }
 
-    /// Same split as the install dispatch below and `PackageInstall::install`:
-    /// these resolutions are installed by re-pointing a symlink, which leaves
-    /// the target and anything nested in it untouched. Everything else
-    /// replaces the folder.
+    /// Mirrors the install dispatch and `PackageInstall::install`: these are
+    /// installed as a symlink, which leaves whatever is nested in the target alone.
     fn install_replaces_folder(&self, tag: resolution::Tag) -> bool {
         match tag {
             resolution::Tag::Symlink | resolution::Tag::Workspace | resolution::Tag::Root => false,
@@ -1652,8 +1646,7 @@ impl<'a> PackageInstaller<'a> {
             || !installer.verify(resolution, &self.root_node_modules_folder);
         self.summary.skipped += (!needs_install) as u32;
 
-        // Child trees inherit `inside_replaced_folder` directly, so the list is
-        // only consulted for trees that are not already inside one.
+        // Not needed inside a replaced folder: child trees inherit the flag.
         if verifying
             && needs_install
             && !inside_replaced_folder
