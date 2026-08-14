@@ -3228,8 +3228,8 @@ fn dependency_resolution_failure(
             format_args!(
                 "Failed to resolve {} dependency '{}' for package '{}'",
                 behavior_str,
-                bstr::BStr::new(dep.name.slice(buf)),
-                bstr::BStr::new(path),
+                bun_core::fmt::escape_control_chars(dep.name.slice(buf)),
+                bun_core::fmt::escape_control_chars(path),
             ),
         );
     } else {
@@ -3239,7 +3239,7 @@ fn dependency_resolution_failure(
             format_args!(
                 "Failed to resolve root {} dependency '{}'",
                 behavior_str,
-                bstr::BStr::new(dep.name.slice(buf)),
+                bun_core::fmt::escape_control_chars(dep.name.slice(buf)),
             ),
         );
     }
