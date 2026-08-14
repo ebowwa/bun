@@ -1094,6 +1094,18 @@ impl<'a> PackageInstaller<'a> {
         self.trees[tree_id as usize].inside_replaced_folder = inside;
     }
 
+    /// Same split as the install dispatch below and `PackageInstall::install`:
+    /// these resolutions are installed by re-pointing a symlink, which leaves
+    /// the target and anything nested in it untouched. Everything else
+    /// replaces the folder.
+    fn install_replaces_folder(&self, tag: resolution::Tag) -> bool {
+        match tag {
+            resolution::Tag::Symlink | resolution::Tag::Workspace | resolution::Tag::Root => false,
+            resolution::Tag::Folder => self.lockfile().is_workspace_tree_id(self.current_tree_id),
+            _ => true,
+        }
+    }
+
     // `pub fn deinit` dropped. All owned fields (`pending_lifecycle_scripts: Vec`,
     // `completed_trees: Bitset`, `trees: Box<[TreeContext]>`, `tree_ids_to_trees_the_id_depends_on`,
     // `node_modules`, `trusted_dependencies_from_update_requests`) impl Drop. Borrowed fields
@@ -1642,7 +1654,11 @@ impl<'a> PackageInstaller<'a> {
 
         // Child trees inherit `inside_replaced_folder` directly, so the list is
         // only consulted for trees that are not already inside one.
-        if verifying && needs_install && !inside_replaced_folder {
+        if verifying
+            && needs_install
+            && !inside_replaced_folder
+            && self.install_replaces_folder(resolution.tag)
+        {
             self.trees[self.current_tree_id as usize]
                 .replaced
                 .push(dependency_id);

@@ -3627,6 +3627,82 @@ describe("hoisting", async () => {
     expect(lockfile).toMatchNodeModulesAt(packageDir);
   });
 
+  test("recreating a workspace link leaves the workspace's nested dependencies alone", async () => {
+    await writeFile(
+      packageJson,
+      JSON.stringify({ name: "foo", workspaces: ["packages/*"], dependencies: { "no-deps": "2.0.0" } }),
+    );
+    await mkdir(join(packageDir, "packages", "ws"), { recursive: true });
+    await writeFile(
+      join(packageDir, "packages", "ws", "package.json"),
+      JSON.stringify({ name: "ws", version: "1.0.0", dependencies: { "no-deps": "1.0.0" } }),
+    );
+    await runBunInstall(env, packageDir);
+
+    // `node_modules/ws` is a link to `packages/ws`, so its nested `no-deps`
+    // lives in `packages/ws/node_modules` and survives the link being redone.
+    const nested = join(packageDir, "packages", "ws", "node_modules", "no-deps", "package.json");
+    expect(await file(nested).json()).toMatchObject({ name: "no-deps", version: "1.0.0" });
+    const { ino } = await lstat(nested);
+
+    await rm(join(packageDir, "node_modules", "ws"), { recursive: true, force: true });
+
+    const { out } = await runBunInstall(env, packageDir, { savesLockfile: false });
+    expect(out).toContain("1 package installed");
+
+    expect(await file(join(packageDir, "node_modules", "ws", "package.json")).json()).toMatchObject({ name: "ws" });
+    expect((await lstat(nested)).ino).toBe(ino);
+
+    const lockfile = parseLockfile(packageDir);
+    expect(lockfile).toMatchNodeModulesAt(packageDir);
+  });
+
+  test("dependency nested in a reinstalled file: dependency of a workspace is reinstalled", async () => {
+    await writeFile(
+      packageJson,
+      JSON.stringify({ name: "foo", workspaces: ["packages/*"], dependencies: { "no-deps": "2.0.0" } }),
+    );
+    await mkdir(join(packageDir, "packages", "ws"), { recursive: true });
+    await mkdir(join(packageDir, "local-dep"));
+    await writeFile(
+      join(packageDir, "local-dep", "package.json"),
+      JSON.stringify({ name: "local-dep", version: "1.0.0", dependencies: { "no-deps": "1.0.0" } }),
+    );
+    await writeFile(
+      join(packageDir, "packages", "ws", "package.json"),
+      JSON.stringify({
+        name: "ws",
+        version: "1.0.0",
+        dependencies: { "local-dep": "file:../../local-dep", "no-deps": "1.1.0" },
+      }),
+    );
+    await runBunInstall(env, packageDir);
+
+    // Unlike a workspace, a file: dependency of a workspace is copied into its
+    // node_modules, so reinstalling it replaces the folder and the no-deps@1.0.0
+    // nested inside it (neither no-deps above it satisfies local-dep).
+    const wsNodeModules = join(packageDir, "packages", "ws", "node_modules");
+    const nested = join(wsNodeModules, "local-dep", "node_modules", "no-deps", "package.json");
+    expect(await file(join(wsNodeModules, "no-deps", "package.json")).json()).toMatchObject({ version: "1.1.0" });
+    expect(await file(nested).json()).toMatchObject({ name: "no-deps", version: "1.0.0" });
+
+    // The root no-deps@2.0.0 has to be downloaded again, so the root tree is
+    // still pending while local-dep is found stale, and local-dep's own
+    // reinstall is held back until after its nested tree has been visited.
+    await rm(join(packageDir, ".bun-cache"), { recursive: true, force: true });
+    await rm(join(packageDir, "node_modules", "no-deps", "package.json"));
+    await rm(join(wsNodeModules, "local-dep", "package.json"));
+
+    const { out } = await runBunInstall(env, packageDir, { savesLockfile: false });
+    expect(out).toContain("3 packages installed");
+
+    expect(await file(join(wsNodeModules, "local-dep", "package.json")).json()).toMatchObject({ name: "local-dep" });
+    expect(await file(nested).json()).toMatchObject({ name: "no-deps", version: "1.0.0" });
+
+    const lockfile = parseLockfile(packageDir);
+    expect(lockfile).toMatchNodeModulesAt(packageDir);
+  });
+
   var tests: any = [
     {
       situation: "1.0.0 - 1.0.10 is in order",
