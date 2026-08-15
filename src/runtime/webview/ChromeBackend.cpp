@@ -1281,20 +1281,31 @@ void Transport::rejectAllAndMarkDead(const WTF::String& reason)
     m_mode = TransportMode::None;
     m_wsOpen = false;
     m_wsPending.clear();
+    // Every registered view died with the browser; the one a later
+    // `new Bun.WebView()` respawns has never heard of their targets. Close
+    // them (the state Target.detachedFromTarget leaves a single dead page
+    // in) so further calls throw ERR_INVALID_STATE. Left open, a view's
+    // next op would go to the respawned browser and handleResponse would
+    // drop the reply (no m_views entry): promise never settles, slot stays
+    // occupied. Walk m_views rather than m_pending: an idle view has no
+    // pending entry but is just as dead. Take the tables first, since
+    // settle() allocates and a GC-triggered ~JSWebView of some other,
+    // already-collected view removes from these maps; iterating m_views
+    // in place would race that removal.
+    auto views = std::exchange(m_views, {});
+    m_pending.clear();
+    m_sessions.clear();
     if (!m_global) return;
     auto* g = m_global;
     JSValue err = createError(g, reason);
-    // Reject each view's slots via settle(). Multiple pending ids may point
-    // at the same view (different slots); settle() is idempotent on an
-    // already-cleared slot — the first settle for a slot rejects, the rest
-    // find barrier.get() == null and no-op.
-    for (auto& [id, entry] : m_pending) {
-        if (JSWebView* v = viewFor(entry.viewId))
-            settle(g, v, entry.slot, false, err);
+    for (auto& [id, weak] : views) {
+        JSWebView* v = weak.get();
+        if (!v) continue;
+        v->m_loading = false;
+        for (auto s : { PendingSlot::Navigate, PendingSlot::Evaluate, PendingSlot::Screenshot, PendingSlot::Misc, PendingSlot::Cdp })
+            settle(g, v, s, false, err);
+        v->m_closed = true;
     }
-    m_pending.clear();
-    m_sessions.clear();
-    m_views.clear();
     updateKeepAlive();
 }
 
@@ -1347,9 +1358,12 @@ uint32_t Transport::registerView(JSWebView* v)
 namespace Ops {
 
 // Allocate promise, store in slot, add to Transport pending map, send frame.
-// Caller guarantees the slot is empty and m_closed == false. Command is
-// moved in; t.send() calls finishAndWrite which zero-copies to the pipe
-// when the body is all-ASCII.
+// Caller guarantees the slot is empty and m_closed == false; the latter
+// implies the view is still in m_views (every path that drops a live view
+// from it, i.e. Ops::close, Target.detachedFromTarget and
+// rejectAllAndMarkDead, also marks it closed), so the reply will find it.
+// Command is moved in; t.send() calls finishAndWrite which zero-copies to
+// the pipe when the body is all-ASCII.
 static JSPromise* sendChromeOp(JSGlobalObject* g, JSWebView* v,
     WriteBarrier<JSPromise>& slot, PendingSlot ps, Method m,
     uint32_t id, Command&& cmd)
@@ -1357,10 +1371,11 @@ static JSPromise* sendChromeOp(JSGlobalObject* g, JSWebView* v,
     auto& vm = g->vm();
     auto& t = transport();
     auto* promise = JSPromise::create(vm, g->promiseStructure());
-    // m_mode == None means neither ensureSpawned nor ensureConnected ran
-    // (constructor already called one, so this is unreachable unless
-    // rejectAllAndMarkDead reset it). WebSocket mode doesn't need
-    // m_wsOpen here — send() queues until onOpen fires.
+    // Backstop: the paths that mark the transport dead or reset m_mode to
+    // None (rejectAllAndMarkDead, updateKeepAlive's WebSocket release) only
+    // run once every view is closed or gone, and closed views are rejected
+    // before reaching here. WebSocket mode doesn't need m_wsOpen here:
+    // send() queues until onOpen fires.
     if (t.m_dead || t.m_mode == TransportMode::None) {
         promise->reject(vm, createError(g, "Chrome connection is not available"_s));
         return promise;

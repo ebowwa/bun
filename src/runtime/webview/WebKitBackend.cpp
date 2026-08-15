@@ -466,6 +466,13 @@ void HostClient::rejectAllAndMarkDead(const WTF::String& reason)
     if (!global) return;
     auto* g = global;
     JSValue err = createError(g, reason);
+    // Every registered view's WKWebView died with the host; the host a
+    // later `new Bun.WebView()` respawns knows none of their viewIds. Close
+    // them so further calls throw ERR_INVALID_STATE. Left open, a view's
+    // next op would be written to the respawned host, whose "invalid
+    // viewId" failure reply handleReply drops (the view is no longer in
+    // viewsById): the promise would never settle and its slot would stay
+    // occupied.
     for (auto& [id, weak] : viewsById) {
         JSWebView* v = weak.get();
         if (!v) continue;
@@ -474,6 +481,7 @@ void HostClient::rejectAllAndMarkDead(const WTF::String& reason)
         settleSlot(g, v, v->m_pendingEval, false, err);
         settleSlot(g, v, v->m_pendingScreenshot, false, err);
         settleSlot(g, v, v->m_pendingMisc, false, err);
+        v->m_closed = true;
     }
     viewsById.clear();
     updateKeepAlive();
