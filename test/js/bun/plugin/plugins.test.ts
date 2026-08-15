@@ -654,13 +654,21 @@ it("builder methods return the builder only when called as methods", () => {
   plugin({
     name: "builder receiver",
     setup(builder) {
-      const { onResolve, onLoad, module: virtualModule } = builder;
+      const options = { filter: /.*/, namespace: "builder-receiver" };
+      const virtualModule = () => ({ exports: {}, loader: "object" }) as const;
+      expect([
+        builder.onResolve(options, () => undefined),
+        builder.onLoad(options, () => undefined),
+        builder.module("builder-receiver-virtual-module", virtualModule),
+      ]).toEqual([builder, builder, builder]);
+
+      const { onResolve, onLoad, module: defineModule } = builder;
       // Closed-over bindings make JSC pass the scope object as the raw receiver
       // of these calls; it must not come back as the return value.
       const bare = () => [
-        onResolve({ filter: /.*/, namespace: "builder-receiver" }, () => undefined),
-        onLoad({ filter: /.*/, namespace: "builder-receiver" }, () => undefined),
-        virtualModule("builder-receiver-virtual-module", () => ({ exports: {}, loader: "object" })),
+        onResolve(options, () => undefined),
+        onLoad(options, () => undefined),
+        defineModule("builder-receiver-virtual-module-bare", virtualModule),
       ];
       expect(bare()).toEqual([undefined, undefined, undefined]);
     },
