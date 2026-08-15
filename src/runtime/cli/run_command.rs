@@ -1485,12 +1485,26 @@ impl Run<'_> {
                 vm.event_loop_ref().tick_possibly_forever();
             }
         } else {
-            while vm.is_event_loop_alive() {
-                vm.tick();
-                vm.auto_tick_active();
+            loop {
+                while vm.is_event_loop_alive() {
+                    vm.tick();
+                    vm.auto_tick_active();
+                }
+
+                vm.on_before_exit();
+
+                // A beforeExit handler may have resolved the stalled await; drain its microtask and go again.
+                if entry_module_pending(vm) {
+                    vm.tick();
+                    if vm.is_event_loop_alive() {
+                        continue;
+                    }
+                }
+                break;
             }
 
-            if ctx.runtime_options.eval.eval_and_print {
+            // While the entry is still suspended, `entry_point_result` holds the loader's own promise.
+            if ctx.runtime_options.eval.eval_and_print && !entry_module_pending(vm) {
                 let to_print: JSValue = 'brk: {
                     let result = vm
                         .entry_point_result
@@ -1537,7 +1551,30 @@ impl Run<'_> {
                 }
             }
 
-            vm.on_before_exit();
+            if let Some(p) = vm.pending_internal_promise {
+                let promise = bun_jsc::JSInternalPromise::opaque_mut(p);
+                match promise.status() {
+                    PromiseStatus::Pending => {
+                        vm.report_unsettled_top_level_await();
+                        if vm.exit_handler.exit_code == 0 {
+                            vm.exit_handler.exit_code = 13;
+                        }
+                    }
+                    // The loader pre-marks this promise handled, so a rejection after beforeExit is only reported here.
+                    PromiseStatus::Rejected
+                        if vm.pending_internal_promise_reported_at != vm.hot_reload_counter =>
+                    {
+                        vm.pending_internal_promise_reported_at = vm.hot_reload_counter;
+                        let result = promise.result(vm.jsc_vm());
+                        let handled = vm.uncaught_exception(vm.global(), result, true);
+                        promise.set_handled();
+                        if !handled && vm.exit_handler.exit_code == 0 {
+                            vm.exit_handler.exit_code = 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         if log_has_msgs(vm) {
@@ -1583,6 +1620,14 @@ fn log_clear_msgs(vm: &mut VirtualMachine) {
         // SAFETY: see `log_has_msgs`.
         unsafe { (*p.as_ptr()).msgs.clear() };
     }
+}
+
+/// The entry module's evaluation is still suspended on a top-level await.
+#[inline]
+fn entry_module_pending(vm: &VirtualMachine) -> bool {
+    vm.pending_internal_promise.is_some_and(|p| {
+        bun_jsc::JSInternalPromise::opaque_ref(p).status() == PromiseStatus::Pending
+    })
 }
 
 #[cold]
