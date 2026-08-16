@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { existsSync } from "fs";
 import { bunEnv, bunExe, compileFixture, isGlibcVersionAtLeast, isWindows, tempDir } from "harness";
 import { freemem, platform } from "os";
+import { join } from "path";
 
 import {
   cc,
@@ -1099,8 +1100,13 @@ it("linkSymbols() functions are not constructors", async () => {
 });
 
 // cc() is the only path into JSFFIFunction::createForFFI. Subprocess for the
-// same leak-checker reason as above; TinyCC has no libc headers on Windows.
-it.skipIf(isWindows)("cc()-compiled functions are not constructors", async () => {
+// same leak-checker reason as above. The source has no #includes: bundled
+// TinyCC cannot see libc headers in CI, and its compile-error longjmp is what
+// conflicts with ASan (see cc.test.ts).
+it("cc()-compiled functions are not constructors", async () => {
+  using dir = tempDir("ffi-cc-construct", {
+    "returns_true.c": "_Bool returns_true(void) { return 1; }\n",
+  });
   await using proc = Bun.spawn({
     cmd: [
       bunExe(),
@@ -1119,7 +1125,7 @@ it.skipIf(isWindows)("cc()-compiled functions are not constructors", async () =>
       }
       console.log(Bun.inspect(returns_true));
       lib.close();`,
-      import.meta.dir + "/ffi-test.c",
+      join(String(dir), "returns_true.c"),
     ],
     env: bunEnv,
     stdout: "pipe",

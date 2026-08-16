@@ -896,6 +896,14 @@ describe("mock()", () => {
     });
 
     if (isBun) {
+      test("a mock has no default .prototype, so new falls back to Object.prototype", () => {
+        const fn = jest.fn();
+        expect(fn.prototype).toBeUndefined();
+        expect(Object.getPrototypeOf(new fn())).toBe(Object.prototype);
+      });
+    }
+
+    if (isBun) {
       test("cross-realm newTarget with a primitive prototype uses the newTarget realm's Object.prototype", () => {
         const ctx = vm.createContext({});
         const Target = vm.runInContext("(function Target() {})", ctx);
