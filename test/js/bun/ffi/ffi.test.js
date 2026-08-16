@@ -1063,7 +1063,7 @@ it("JSCallback tolerates worker.terminate() arriving inside the callback", async
 // Runs in a subprocess for the same reason as the JSCallback tests above: the
 // linked library's native handle is not finalized on `bun test`'s exit path,
 // which the ASan lane's leak checker reports against this file.
-it("FFI functions are not constructors", async () => {
+it("linkSymbols() functions are not constructors", async () => {
   await using proc = Bun.spawn({
     cmd: [
       bunExe(),
@@ -1526,6 +1526,19 @@ describe.skipIf(!FFI_FIXTURE_PATH)("engine-native FFI (single implementation)", 
     expect(linked.symbols.echoPtr(1234)).toBe(1234);
     expect(typeof linked.symbols.sum.ptr).toBe("number");
     linked.close();
+  });
+
+  it("cc()-compiled functions are not constructors", () => {
+    const {
+      symbols: { returns_true },
+    } = cc({
+      source: import.meta.dir + "/ffi-test.c",
+      symbols: { returns_true: { args: [], returns: "bool" } },
+    });
+    expect(returns_true()).toBe(true);
+    expect(() => new returns_true()).toThrow(TypeError);
+    expect(() => Reflect.construct(returns_true, [])).toThrow(TypeError);
+    expect(Bun.inspect(returns_true)).toBe("[Function: returns_true]");
   });
 
   it("buffer_length passes the view's byteLength, atomically paired with the pointer", () => {
