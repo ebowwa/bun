@@ -1098,6 +1098,41 @@ it("linkSymbols() functions are not constructors", async () => {
   });
 });
 
+// cc() is the only path into JSFFIFunction::createForFFI. Subprocess for the
+// same leak-checker reason as above; TinyCC has no libc headers on Windows.
+it.skipIf(isWindows)("cc()-compiled functions are not constructors", async () => {
+  await using proc = Bun.spawn({
+    cmd: [
+      bunExe(),
+      "-e",
+      `import { cc } from "bun:ffi";
+      const lib = cc({ source: process.argv[1], symbols: { returns_true: { args: [], returns: "bool" } } });
+      const { returns_true } = lib.symbols;
+      console.log(returns_true());
+      for (const construct of [() => new returns_true(), () => Reflect.construct(returns_true, [])]) {
+        try {
+          construct();
+          console.log("constructed");
+        } catch (e) {
+          console.log(e.constructor.name);
+        }
+      }
+      console.log(Bun.inspect(returns_true));
+      lib.close();`,
+      import.meta.dir + "/ffi-test.c",
+    ],
+    env: bunEnv,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+  expect({ stdout, stderr, exitCode }).toEqual({
+    stdout: "true\nTypeError\nTypeError\n[Function: returns_true]\n",
+    stderr: "",
+    exitCode: 0,
+  });
+});
+
 // runtime functions like the node:os natives are created through
 // JSFFIFunction::create rather than createForFFI, and do not need TinyCC
 it("runtime native functions are not constructors", () => {
@@ -1526,19 +1561,6 @@ describe.skipIf(!FFI_FIXTURE_PATH)("engine-native FFI (single implementation)", 
     expect(linked.symbols.echoPtr(1234)).toBe(1234);
     expect(typeof linked.symbols.sum.ptr).toBe("number");
     linked.close();
-  });
-
-  it("cc()-compiled functions are not constructors", () => {
-    const {
-      symbols: { returns_true },
-    } = cc({
-      source: import.meta.dir + "/ffi-test.c",
-      symbols: { returns_true: { args: [], returns: "bool" } },
-    });
-    expect(returns_true()).toBe(true);
-    expect(() => new returns_true()).toThrow(TypeError);
-    expect(() => Reflect.construct(returns_true, [])).toThrow(TypeError);
-    expect(Bun.inspect(returns_true)).toBe("[Function: returns_true]");
   });
 
   it("buffer_length passes the view's byteLength, atomically paired with the pointer", () => {
