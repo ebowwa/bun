@@ -31,8 +31,8 @@
 namespace WebCore {
 
 // Like the URL constructor (DOMURL.cpp), reject special-scheme hosts whose
-// xn-- labels fail UTS #46; the WHATWG setters fail silently, so refuse the
-// commit instead of throwing.
+// xn-- labels fail UTS #46: the WHATWG setters fail silently, so refuse the
+// commit instead of throwing, and a blob: URL's inner URL counts as unparsed.
 static bool hasAcceptableHost(const WTF::URL& url)
 {
     return Bun::hasValidPunycodeHost(url.host()) || !url.hasSpecialScheme();
@@ -47,7 +47,7 @@ String URLDecomposition::origin() const
     if (fullURL.protocolIsBlob()) {
         const String& path = fullURL.path().toString();
         const URL subUrl { URL {}, path };
-        if (subUrl.isValid()) {
+        if (subUrl.isValid() && hasAcceptableHost(subUrl)) {
             if (subUrl.protocolIsInHTTPFamily() or subUrl.protocolIsInFTPFamily() or subUrl.protocolIs("ws"_s) or subUrl.protocolIs("wss"_s) or subUrl.protocolIsFile())
                 return subUrl.protocolHostAndPort();
         }
