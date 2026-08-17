@@ -60,6 +60,7 @@ class GlobalObject;
 
 namespace Bun {
 class StrongRootBlock;
+class HeapSizeLimitObserver;
 }
 
 namespace WebCore {
@@ -135,6 +136,9 @@ public:
     virtual ~JSVMClientData();
 
     static void create(JSC::VM*, void* bunVM, bool isWorkerVM);
+
+    // Registers the --max-old-space-size observer with this VM's heap.
+    void enforceMaxOldSpaceSize(JSC::VM&, size_t limitBytes);
 
     JSHeapData& heapData() { return *m_heapData; }
     BunBuiltinNames& builtinNames() { return m_builtinNames; }
@@ -221,6 +225,11 @@ private:
 
     SentinelLinkedList<JSVMClientDataClient, BasicRawSentinelNode<JSVMClientDataClient>> m_clients;
     bool m_isWorkerVM { false };
+
+    // Enforces --max-old-space-size. Registered with the heap by
+    // enforceMaxOldSpaceSize() (main thread VM only), unregistered in
+    // ~JSVMClientData (which ~VM runs while `heap` is alive).
+    std::unique_ptr<Bun::HeapSizeLimitObserver> m_heapSizeLimitObserver;
 
 public:
     // upstream's `&vm != commonVMOrNull()`
