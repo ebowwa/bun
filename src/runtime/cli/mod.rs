@@ -816,6 +816,20 @@ pub mod command {
         unsafe { &mut *bun_options_types::context::global_ptr() }
     }
 
+    /// Set by `which()`; the initial value is the flag-free `bun <subcommand> ...` layout.
+    static COMMAND_ARGS_START: core::sync::atomic::AtomicUsize =
+        core::sync::atomic::AtomicUsize::new(2);
+
+    /// Index into `bun::argv()` of the first argument after the subcommand
+    /// keyword `which()` dispatched on, for commands that read their arguments
+    /// straight out of argv. The keyword is not always argv[1]: runtime flags
+    /// typed before it (`bun --bun upgrade`) and the tokens `BUN_OPTIONS`
+    /// splices in after argv[0] both shift it right.
+    #[inline]
+    pub(crate) fn command_args_start() -> usize {
+        COMMAND_ARGS_START.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Canonical home: src/runtime/cli/mod.rs, inside `pub mod command { ... }`
     // (crate path `bun_runtime::cli::command::{is_bun_x, is_node, which}`).
@@ -945,6 +959,7 @@ pub mod command {
         let Some(mut first_arg_name) = iter.next() else {
             return Tag::AutoCommand;
         };
+        let mut first_arg_index: usize = 1;
         while !first_arg_name.is_empty()
             && first_arg_name[0] == b'-'
             && !(first_arg_name.len() > 1 && first_arg_name[1] == b'e')
@@ -956,7 +971,9 @@ pub mod command {
                 Some(n) => first_arg_name = n,
                 None => return Tag::AutoCommand,
             }
+            first_arg_index += 1;
         }
+        COMMAND_ARGS_START.store(first_arg_index + 1, core::sync::atomic::Ordering::Relaxed);
 
         type RootCommandMatcher = strings::ExactSizeMatcher<12>;
         let x = RootCommandMatcher::r#match(first_arg_name);
@@ -1504,7 +1521,7 @@ pub mod command {
     fn exec_init() -> CmdResult {
         // InitCommand parses its own argv (no Context).
         let argv = argv_zslice();
-        super::init_command::InitCommand::exec(&argv[2.min(argv.len())..])
+        super::init_command::InitCommand::exec(&argv[command_args_start().min(argv.len())..])
     }
 
     #[cold]
@@ -1943,10 +1960,10 @@ To create a project with the official Next.js scaffolding tool, run\n\
         let mut package_name: &[u8] = b"";
         let mut property_path: Option<&[u8]> = None;
 
-        // Find non-flag arguments starting from argv[2] (after "bun info").
+        // Find non-flag arguments after the "info" keyword.
         let mut found_package = false;
         let argv = bun::argv();
-        for arg in argv.iter().skip(2) {
+        for arg in argv.iter().skip(command_args_start()) {
             // Skip flags
             if !arg.is_empty() && arg[0] == b'-' {
                 continue;
