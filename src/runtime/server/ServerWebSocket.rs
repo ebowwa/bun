@@ -1446,7 +1446,7 @@ impl ServerWebSocket {
     }
 
     #[bun_jsc::host_fn(method)]
-    pub(crate) fn get_buffered_amount(
+    pub(crate) fn get_buffered_amount_method(
         &self,
         _global_this: &JSGlobalObject,
         _callframe: &CallFrame,
@@ -1460,6 +1460,17 @@ impl ServerWebSocket {
         Ok(JSValue::js_number(
             self.websocket().get_buffered_amount() as f64
         ))
+    }
+
+    #[bun_jsc::host_fn(getter)]
+    pub(crate) fn get_buffered_amount(&self, _global_this: &JSGlobalObject) -> JSValue {
+        bun_output::scoped_log!(WebSocketServer, "get bufferedAmount");
+
+        if self.is_closed() {
+            return JSValue::js_number(0.0);
+        }
+
+        JSValue::js_number(self.websocket().get_buffered_amount() as f64)
     }
 
     #[bun_jsc::host_fn(method)]

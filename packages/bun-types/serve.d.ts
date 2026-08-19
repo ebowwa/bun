@@ -255,6 +255,32 @@ declare module "bun" {
     cork<T = unknown>(callback: (ws: ServerWebSocket<T>) => T): T;
 
     /**
+     * The number of bytes of data that have been queued with {@link ServerWebSocket.send} or
+     * related methods but not yet written to the client.
+     *
+     * This is useful for implementing backpressure when sending large amounts of data:
+     * poll it after sends and pause when it exceeds a threshold, then resume when the
+     * {@link WebSocketHandler.drain} callback fires.
+     *
+     * @example
+     * ```ts
+     * ws.send(payload);
+     * if (ws.bufferedAmount > 1_000_000) {
+     *   // slow down or drop frames
+     * }
+     * ```
+     */
+    readonly bufferedAmount: number;
+
+    /**
+     * The number of bytes of data that have been queued with {@link ServerWebSocket.send} or
+     * related methods but not yet written to the client.
+     *
+     * This is the method form of {@link ServerWebSocket.bufferedAmount}.
+     */
+    getBufferedAmount(): number;
+
+    /**
      * The IP address of the client.
      *
      * @example

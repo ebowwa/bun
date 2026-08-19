@@ -327,8 +327,13 @@ export default [
         passThis: true,
       },
       getBufferedAmount: {
-        fn: "getBufferedAmount",
+        // The `fn` string must differ from the `bufferedAmount` getter's
+        // `getBufferedAmount` (the codegen dedupes thunks by that string).
+        fn: "getBufferedAmountMethod",
         length: 0,
+      },
+      bufferedAmount: {
+        getter: "getBufferedAmount",
       },
       binaryType: {
         getter: "getBinaryType",
