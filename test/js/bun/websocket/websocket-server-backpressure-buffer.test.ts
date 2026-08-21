@@ -55,6 +55,69 @@ async function pausedClient(port: number): Promise<{ sock: net.Socket; initial: 
 }
 
 describe("BackPressure buffer", () => {
+  // `bufferedAmount` is the spec-named property view of the same value the
+  // `getBufferedAmount()` method returns. Both are the number of bytes queued
+  // but not yet written to the client.
+  it.skipIf(isWindows)("bufferedAmount reflects queued bytes and drains to zero", async () => {
+    const SIZE = 8 * 1024 * 1024;
+    const payload = patternBuffer(SIZE, 0xbeef);
+
+    const opened = Promise.withResolvers<import("bun").ServerWebSocket<unknown>>();
+    const drained = Promise.withResolvers<void>();
+    await using server = Bun.serve({
+      port: 0,
+      fetch(req, s) {
+        if (s.upgrade(req)) return;
+        return new Response("no", { status: 500 });
+      },
+      websocket: {
+        maxBackpressure: SIZE * 2,
+        idleTimeout: 0,
+        open(ws) {
+          opened.resolve(ws);
+        },
+        drain(ws) {
+          if (ws.bufferedAmount === 0) drained.resolve();
+        },
+        message() {},
+        close() {
+          drained.resolve();
+        },
+      },
+    });
+
+    const { sock, initial } = await pausedClient(server.port);
+    const ws = await opened.promise;
+
+    // Property and method agree while idle.
+    expect(typeof ws.bufferedAmount).toBe("number");
+    expect(ws.bufferedAmount).toBe(ws.getBufferedAmount());
+
+    // A >16KB send while the client is paused lands in BackPressure.
+    ws.sendBinary(payload);
+    expect(ws.bufferedAmount).toBe(ws.getBufferedAmount());
+    expect(ws.bufferedAmount).toBeGreaterThan(0);
+    expect(ws.bufferedAmount).toBeLessThanOrEqual(SIZE + 10);
+
+    // Drain and confirm the property reports zero when the buffer empties.
+    const target = 10 + SIZE;
+    let received = initial.length;
+    sock.resume();
+    const allReceived = Promise.withResolvers<void>();
+    if (received >= target) allReceived.resolve();
+    sock.on("data", chunk => {
+      received += chunk.length;
+      if (received >= target) allReceived.resolve();
+    });
+    sock.on("close", () => allReceived.resolve());
+
+    await allReceived.promise;
+    await drained.promise;
+    sock.destroy();
+
+    expect(ws.bufferedAmount).toBe(0);
+  });
+
   // >16KB sends take the direct write2 path and append() the unwritten tail;
   // drain exercises erase() as a head-cursor bump. Skipped on Windows: Winsock
   // loopback accepts the full payload so BackPressure is never reached there.
